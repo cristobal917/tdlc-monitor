@@ -1,0 +1,35 @@
+name: TDLC Monitor WhatsApp
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - run: pip install requests beautifulsoup4 anthropic
+
+      - name: Ejecutar monitor
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CALLMEBOT_PHONE:   ${{ secrets.CALLMEBOT_PHONE }}
+          CALLMEBOT_APIKEY:  ${{ secrets.CALLMEBOT_APIKEY }}
+        run: python monitor.py
+
+      - name: Guardar hash
+        run: |
+          git config user.name "tdlc-bot"
+          git config user.email "bot@tdlc"
+          git add last_hash.txt
+          git diff --cached --quiet || git commit -m "update hash"
+          git push origin main || true
