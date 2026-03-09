@@ -33,10 +33,12 @@ def save_hash(h):
 def summarize(raw_text):
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/tdlc-monitor",
+        "X-Title": "TDLC Monitor"
     }
     body = {
-        "model": "mistralai/mistral-7b-instruct:free",
+        "model": "google/gemma-3-4b-it:free",
         "messages": [{
             "role": "user",
             "content": (
@@ -48,6 +50,7 @@ def summarize(raw_text):
         }]
     }
     r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=body)
+    print("OpenRouter response:", r.json())  # para ver si hay error
     return r.json()["choices"][0]["message"]["content"]
 
 def send_whatsapp(message):
