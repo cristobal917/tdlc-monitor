@@ -1,14 +1,13 @@
 import requests
 from bs4 import BeautifulSoup
-import anthropic
 import os
 import hashlib
 from datetime import date
 
-ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
-CALLMEBOT_PHONE   = os.environ["CALLMEBOT_PHONE"]
-CALLMEBOT_APIKEY  = os.environ["CALLMEBOT_APIKEY"]
-HASH_FILE         = "last_hash.txt"
+CALLMEBOT_PHONE  = os.environ["CALLMEBOT_PHONE"]
+CALLMEBOT_APIKEY = os.environ["CALLMEBOT_APIKEY"]
+OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
+HASH_FILE        = "last_hash.txt"
 
 def fetch_tdlc():
     url = "https://consultas.tdlc.cl/estadoDiario"
@@ -32,11 +31,13 @@ def save_hash(h):
         f.write(h)
 
 def summarize(raw_text):
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    msg = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=800,
-        messages=[{
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    body = {
+        "model": "mistralai/mistral-7b-instruct:free",
+        "messages": [{
             "role": "user",
             "content": (
                 f"Eres un asistente jurídico. A continuación está el estado diario del "
@@ -45,8 +46,9 @@ def summarize(raw_text):
                 f"Usa viñetas. Máximo 300 palabras.\n\nCONTENIDO:\n{raw_text[:6000]}"
             )
         }]
-    )
-    return msg.content[0].text
+    }
+    r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=body)
+    return r.json()["choices"][0]["message"]["content"]
 
 def send_whatsapp(message):
     url = (
