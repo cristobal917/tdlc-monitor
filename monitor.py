@@ -9,25 +9,26 @@ CALLMEBOT_APIKEY   = os.environ["CALLMEBOT_APIKEY"]
 OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
 HASH_FILE          = "last_hash.txt"
 
+def fetch_tramites(causa_id, session_headers):
+    url = f"https://consultas.tdlc.cl/rest/tramite/byorden/{causa_id}"
+    r = requests.get(url, headers=session_headers, timeout=10)
+    try:
+        return r.json()
+    except:
+        return []
+
 def fetch_tdlc():
     with sync_playwright() as p:
         browser = p.chromium.launch()
         context = browser.new_context()
-        
-        api_causas_url = None
+
         causas_data = []
-        estado_data = []
+        cookies_capturadas = {}
 
         def handle_response(response):
-            nonlocal api_causas_url
             try:
                 if "byestadodiario" in response.url:
-                    api_causas_url = response.url
                     causas_data.extend(response.json())
-                elif "estadodiario" in response.url.lower() and "validateURL" not in response.url:
-                    data = response.json()
-                    if isinstance(data, list):
-                        estado_data.extend(data)
             except:
                 pass
 
@@ -36,7 +37,7 @@ def fetch_tdlc():
         page.goto("https://consultas.tdlc.cl/estadoDiario", wait_until="networkidle")
         page.wait_for_timeout(3000)
 
-        # Hacer clic en detalle para disparar la API
+        # Hacer clic en detalle
         try:
             detalle_icon = page.query_selector(".glyphicon-new-window")
             if detalle_icon:
@@ -45,32 +46,45 @@ def fetch_tdlc():
         except Exception as e:
             print("Error al hacer clic:", e)
 
+        # Capturar cookies para usarlas en requests
+        cookies = context.cookies()
         browser.close()
 
-        # Formatear causas
-        if not causas_data:
-            return "No se encontraron causas"
+    # Construir headers con cookies
+    cookie_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies])
+    session_headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Cookie": cookie_str,
+        "Referer": "https://consultas.tdlc.cl/estadoDiario"
+    }
 
-        resultado = f"Estado Diario TDLC - {date.today().strftime('%d/%m/%Y')}\n"
-        resultado += f"Total causas: {len(causas_data)}\n\n"
+    if not causas_data:
+        return "No se encontraron causas"
 
-        for causa in causas_data:
-            rol = f"{causa.get('procedimiento', {}).get('iniciales', '')}-{causa.get('folio', '')}-{causa.get('anio', '')}"
-            descripcion = causa.get('descripcion', 'Sin descripción')
-            tramites = causa.get('tramites', [])
-            n_tramites = len(tramites) if isinstance(tramites, list) else 0
-            resultado += f"ROL: {rol}\n"
-            resultado += f"Carátula: {descripcion}\n"
-            resultado += f"Trámites: {n_tramites}\n"
-            
-            # Detalle de cada trámite
-            if isinstance(tramites, list):
-                for t in tramites:
-                    tipo = t.get('tipoTramite', {}).get('name', '') if isinstance(t.get('tipoTramite'), dict) else ''
-                    resultado += f"  - {tipo}\n"
-            resultado += "\n"
+    resultado = f"Estado Diario TDLC - {date.today().strftime('%d/%m/%Y')}\n"
+    resultado += f"Total causas: {len(causas_data)}\n\n"
 
-        return resultado
+    for causa in causas_data:
+        rol = f"{causa.get('procedimiento', {}).get('iniciales', '')}-{causa.get('folio', '')}-{causa.get('anio', '')}"
+        descripcion = causa.get('descripcion', 'Sin descripción')
+        causa_id = causa.get('idOrdenTrabajo')
+
+        resultado += f"ROL: {rol}\n"
+        resultado += f"Carátula: {descripcion}\n"
+
+        # Obtener trámites de esta causa
+        tramites = fetch_tramites(causa_id, session_headers)
+        if tramites:
+            for t in tramites:
+                tipo = t.get('tipoTramite', {}).get('name', 'Sin tipo') if isinstance(t.get('tipoTramite'), dict) else 'Sin tipo'
+                fecha = t.get('fechaTramite', '')[:10] if t.get('fechaTramite') else ''
+                resultado += f"  → {tipo} ({fecha})\n"
+        else:
+            resultado += "  → Sin trámites detallados\n"
+
+        resultado += "\n"
+
+    return resultado
 
 def get_hash(text):
     return hashlib.md5(text.encode()).hexdigest()
