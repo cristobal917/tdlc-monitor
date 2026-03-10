@@ -47,10 +47,10 @@ def summarize(raw_text):
                 f"Eres un asistente juridico. A continuacion esta el estado diario del "
                 f"TDLC (Tribunal de Defensa de la Libre Competencia de Chile) del {date.today().strftime('%d/%m/%Y')}.\n\n"
                 f"Lista cada causa con su numero de rol, las partes involucradas y el tipo de actuacion o resolucion. "
-                f"Usa vinetas. Maximo 300 palabras. Responde en español con tildes correctas.\n\nCONTENIDO:\n{raw_text[:8000]}"
+                f"Usa vinetas. Maximo 300 palabras. Responde en espanol con tildes correctas.\n\nCONTENIDO:\n{raw_text[:8000]}"
             )
         }]
-    )
+    }
     r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=body)
     print("OpenRouter response:", r.json())
     return r.json()["choices"][0]["message"]["content"]
