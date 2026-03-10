@@ -70,7 +70,7 @@ def save_hash(h):
         f.write(h)
 
 def summarize(raw_text):
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
     headers = {"Content-Type": "application/json"}
     params = {"key": os.environ["GEMINI_API_KEY"]}
     body = {
