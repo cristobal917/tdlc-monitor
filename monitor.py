@@ -12,35 +12,47 @@ HASH_FILE          = "last_hash.txt"
 def fetch_tdlc():
     with sync_playwright() as p:
         browser = p.chromium.launch()
-        page = browser.new_page()
+        context = browser.new_context()
+        
+        # Interceptar llamadas a la API
+        api_responses = []
+        
+        def handle_response(response):
+            if "estadoDiario" in response.url or "tramite" in response.url.lower() or "causa" in response.url.lower():
+                try:
+                    data = response.json()
+                    api_responses.append({"url": response.url, "data": data})
+                    print(f"API interceptada: {response.url}")
+                except:
+                    pass
+        
+        page = context.new_page()
+        page.on("response", handle_response)
         page.goto("https://consultas.tdlc.cl/estadoDiario", wait_until="networkidle")
         page.wait_for_timeout(3000)
-
-        with open("debug.html", "w", encoding="utf-8") as f:
-            f.write(page.content())
-        print("HTML guardado")
         
-        # Captura el HTML completo para ver links y botones
-        html = page.content()
-        text = page.inner_text("body")
-        
-        # Intenta encontrar y hacer clic en el link de detalle
+        # Hacer clic en el ícono de detalle
         try:
-            # Busca links o botones en la tabla
-            links = page.query_selector_all("table a, table button, td a")
-            detalle_text = ""
-            for link in links:
-                link.click()
-                page.wait_for_timeout(2000)
-                detalle_text += page.inner_text("body") + "\n---\n"
-                page.go_back()
-                page.wait_for_timeout(2000)
+            detalle_icon = page.query_selector(".glyphicon-new-window")
+            if detalle_icon:
+                detalle_icon.click()
+                page.wait_for_timeout(3000)
+                print("Clic en detalle realizado")
         except Exception as e:
-            print("Error al hacer clic en links:", e)
-            detalle_text = ""
+            print("Error al hacer clic:", e)
         
         browser.close()
-        return text + "\n\nDETALLE:\n" + detalle_text
+        
+        # Formatear los datos interceptados
+        resultado = ""
+        for resp in api_responses:
+            resultado += f"\nURL: {resp['url']}\nDATA: {resp['data']}\n---\n"
+        
+        if not resultado:
+            resultado = "No se interceptaron llamadas API"
+        
+        print("APIs interceptadas:", resultado[:500])
+        return resultado
 
 def get_hash(text):
     return hashlib.md5(text.encode()).hexdigest()
