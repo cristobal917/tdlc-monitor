@@ -77,7 +77,7 @@ def summarize(raw_text):
         "X-Title": "TDLC Monitor"
     }
     body = {
-        "model": "google/gemma-3-4b-it:free",
+        "model": "meta-llama/llama-3.2-3b-instruct:free",
         "messages": [{
             "role": "user",
             "content": (
@@ -89,8 +89,13 @@ def summarize(raw_text):
         }]
     }
     r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=body)
-    print("OpenRouter response:", r.json())
-    return r.json()["choices"][0]["message"]["content"]
+    data = r.json()
+    print("OpenRouter response:", data)
+    if "choices" in data:
+        return data["choices"][0]["message"]["content"]
+    else:
+        # Si falla la IA, enviar el texto crudo directamente
+        return raw_text[:1200]
 
 def send_whatsapp(message):
     max_chars = 1500
