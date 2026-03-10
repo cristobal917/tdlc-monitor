@@ -93,6 +93,29 @@ def summarize(raw_text):
     else:
         return raw_text
 
+def send_telegram(message):
+    max_chars = 4000
+    partes = []
+
+    while len(message) > max_chars:
+        corte = message[:max_chars].rfind("\n")
+        if corte == -1:
+            corte = max_chars
+        partes.append(message[:corte])
+        message = message[corte:].strip()
+    partes.append(message)
+
+    total = len(partes)
+    for i, parte in enumerate(partes):
+        encabezado = f"📋 Parte {i+1}/{total}\n\n" if total > 1 else ""
+        url = f"https://api.telegram.org/bot{os.environ['TELEGRAM_TOKEN']}/sendMessage"
+        requests.post(url, json={
+            "chat_id": os.environ["TELEGRAM_CHAT_ID"],
+            "text": encabezado + parte
+        })
+        print(f"Telegram parte {i+1}/{total} enviado")
+        time.sleep(1)
+
 def send_whatsapp(message):
     max_chars = 1500
     partes = []
@@ -128,6 +151,7 @@ if __name__ == "__main__":
         print("¡Contenido nuevo! Enviando resumen...")
         summary = summarize(raw)
         mensaje = f"🔔 TDLC {date.today().strftime('%d/%m/%Y')}\n\n{summary}"
+        send_telegram(mensaje)
         send_whatsapp(mensaje)
         save_hash(current_hash)
         print("Listo.")
