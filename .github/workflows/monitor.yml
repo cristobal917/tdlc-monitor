@@ -17,7 +17,11 @@ jobs:
         with:
           python-version: '3.11'
 
-      - run: pip install requests beautifulsoup4 anthropic
+      - name: Instalar dependencias
+        run: |
+          pip install requests playwright
+          playwright install chromium
+          playwright install-deps chromium
 
       - name: Ejecutar monitor
         env:
