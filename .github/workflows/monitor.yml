@@ -30,6 +30,13 @@ jobs:
           CALLMEBOT_APIKEY:  ${{ secrets.CALLMEBOT_APIKEY }}
         run: python monitor.py
 
+        - name: Subir HTML de debug
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: debug-html
+          path: debug.html
+
       - name: Guardar hash
         run: |
           git config user.name "tdlc-bot"
