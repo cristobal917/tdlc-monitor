@@ -48,12 +48,13 @@ def fetch_tdlc():
     resultado += f"Total causas: {len(causas_data)}\n\n"
 
     for causa in causas_data:
-        rol = f"{causa.get('procedimiento', {}).get('iniciales', '')}-{causa.get('folio', '')}-{causa.get('anio', '')}"
+        rol = causa.get('rol', 'Sin ROL')
         descripcion = causa.get('descripcion', 'Sin descripción')
-        tramites = causa.get('tramites', [])
+        n_tramites = causa.get('tramites', 0)
 
         resultado += f"ROL: {rol}\n"
         resultado += f"Carátula: {descripcion}\n"
+        resultado += f"Trámites hoy: {n_tramites}\n\n"
 
         if tramites:
             for t in tramites:
