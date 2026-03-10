@@ -29,11 +29,13 @@ def fetch_tdlc():
         cookies_capturadas = {}
 
         def handle_response(response):
-            try:
-                if "byestadodiario" in response.url:
-                    causas_data.extend(response.json())
-            except:
-                pass
+    try:
+        if "byestadodiario" in response.url:
+            data = response.json()
+            print("Muestra causa[0]:", str(data[0])[:500])
+            causas_data.extend(data)
+    except:
+        pass
 
         page = context.new_page()
         page.on("response", handle_response)
