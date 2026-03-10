@@ -15,9 +15,28 @@ def fetch_tdlc():
         page = browser.new_page()
         page.goto("https://consultas.tdlc.cl/estadoDiario", wait_until="networkidle")
         page.wait_for_timeout(3000)
+        
+        # Captura el HTML completo para ver links y botones
+        html = page.content()
         text = page.inner_text("body")
+        
+        # Intenta encontrar y hacer clic en el link de detalle
+        try:
+            # Busca links o botones en la tabla
+            links = page.query_selector_all("table a, table button, td a")
+            detalle_text = ""
+            for link in links:
+                link.click()
+                page.wait_for_timeout(2000)
+                detalle_text += page.inner_text("body") + "\n---\n"
+                page.go_back()
+                page.wait_for_timeout(2000)
+        except Exception as e:
+            print("Error al hacer clic en links:", e)
+            detalle_text = ""
+        
         browser.close()
-        return text
+        return text + "\n\nDETALLE:\n" + detalle_text
 
 def get_hash(text):
     return hashlib.md5(text.encode()).hexdigest()
