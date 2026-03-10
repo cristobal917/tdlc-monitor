@@ -15,6 +15,10 @@ def fetch_tdlc():
         page = browser.new_page()
         page.goto("https://consultas.tdlc.cl/estadoDiario", wait_until="networkidle")
         page.wait_for_timeout(3000)
+
+        with open("debug.html", "w", encoding="utf-8") as f:
+            f.write(page.content())
+        print("HTML guardado")
         
         # Captura el HTML completo para ver links y botones
         html = page.content()
