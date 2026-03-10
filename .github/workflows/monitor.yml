@@ -2,7 +2,7 @@ name: TDLC Monitor WhatsApp
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -26,11 +26,11 @@ jobs:
       - name: Ejecutar monitor
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          CALLMEBOT_PHONE:   ${{ secrets.CALLMEBOT_PHONE }}
-          CALLMEBOT_APIKEY:  ${{ secrets.CALLMEBOT_APIKEY }}
+          CALLMEBOT_PHONE:    ${{ secrets.CALLMEBOT_PHONE }}
+          CALLMEBOT_APIKEY:   ${{ secrets.CALLMEBOT_APIKEY }}
         run: python monitor.py
 
-        - name: Subir HTML de debug
+      - name: Subir HTML de debug
         if: always()
         uses: actions/upload-artifact@v3
         with:
