@@ -91,7 +91,7 @@ def summarize(raw_text):
     if "candidates" in data:
         return data["candidates"][0]["content"]["parts"][0]["text"]
     else:
-        return raw_text[:1200]
+        return raw_text
 
 def send_whatsapp(message):
     max_chars = 1500
