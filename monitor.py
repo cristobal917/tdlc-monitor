@@ -12,10 +12,12 @@ HASH_FILE          = "last_hash.txt"
 
 def fetch_tramites(causa_id, session_headers):
     url = f"https://consultas.tdlc.cl/rest/tramite/byorden/{causa_id}"
-    r = requests.get(url, headers=session_headers, timeout=10)
     try:
+        r = requests.get(url, headers=session_headers, timeout=10)
+        print(f"Trámites {causa_id} status: {r.status_code} - respuesta: {r.text[:200]}")
         return r.json()
-    except:
+    except Exception as e:
+        print(f"Error tramites {causa_id}: {e}")
         return []
 
 def fetch_tdlc():
