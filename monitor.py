@@ -1,5 +1,6 @@
 import os
 import hashlib
+import time
 from datetime import date
 import requests
 from playwright.sync_api import sync_playwright
@@ -123,12 +124,28 @@ def summarize(raw_text):
     return r.json()["choices"][0]["message"]["content"]
 
 def send_whatsapp(message):
-    url = (
-        f"https://api.callmebot.com/whatsapp.php"
-        f"?phone={CALLMEBOT_PHONE}&text={requests.utils.quote(message)}&apikey={CALLMEBOT_APIKEY}"
-    )
-    r = requests.get(url)
-    print("WhatsApp status:", r.status_code)
+    max_chars = 1500
+    partes = []
+    
+    while len(message) > max_chars:
+        # Cortar en el último salto de línea antes del límite
+        corte = message[:max_chars].rfind("\n")
+        if corte == -1:
+            corte = max_chars
+        partes.append(message[:corte])
+        message = message[corte:].strip()
+    partes.append(message)
+
+    total = len(partes)
+    for i, parte in enumerate(partes):
+        encabezado = f"📋 Parte {i+1}/{total}\n\n" if total > 1 else ""
+        url = (
+            f"https://api.callmebot.com/whatsapp.php"
+            f"?phone={CALLMEBOT_PHONE}&text={requests.utils.quote(encabezado + parte)}&apikey={CALLMEBOT_APIKEY}"
+        )
+        r = requests.get(url)
+        print(f"WhatsApp parte {i+1}/{total} status:", r.status_code)
+        time.sleep(3)  # esperar entre mensajes para no saturar
 
 if __name__ == "__main__":
     print("Verificando TDLC...")
