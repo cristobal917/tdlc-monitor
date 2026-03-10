@@ -1,21 +1,23 @@
-import requests
-from bs4 import BeautifulSoup
 import os
 import hashlib
 from datetime import date
+import requests
+from playwright.sync_api import sync_playwright
 
-CALLMEBOT_PHONE  = os.environ["CALLMEBOT_PHONE"]
-CALLMEBOT_APIKEY = os.environ["CALLMEBOT_APIKEY"]
+CALLMEBOT_PHONE    = os.environ["CALLMEBOT_PHONE"]
+CALLMEBOT_APIKEY   = os.environ["CALLMEBOT_APIKEY"]
 OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
-HASH_FILE        = "last_hash.txt"
+HASH_FILE          = "last_hash.txt"
 
 def fetch_tdlc():
-    url = "https://consultas.tdlc.cl/estadoDiario"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    r = requests.get(url, headers=headers, timeout=30)
-    r.raise_for_status()
-    soup = BeautifulSoup(r.text, "html.parser")
-    return soup.get_text(separator="\n", strip=True)
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.goto("https://consultas.tdlc.cl/estadoDiario", wait_until="networkidle")
+        page.wait_for_timeout(3000)
+        text = page.inner_text("body")
+        browser.close()
+        return text
 
 def get_hash(text):
     return hashlib.md5(text.encode()).hexdigest()
@@ -50,7 +52,7 @@ def summarize(raw_text):
         }]
     }
     r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=body)
-    print("OpenRouter response:", r.json())  # para ver si hay error
+    print("OpenRouter response:", r.json())
     return r.json()["choices"][0]["message"]["content"]
 
 def send_whatsapp(message):
@@ -64,6 +66,7 @@ def send_whatsapp(message):
 if __name__ == "__main__":
     print("Verificando TDLC...")
     raw = fetch_tdlc()
+    print("Texto extraído:", raw[:300])
     current_hash = get_hash(raw)
 
     if current_hash == load_last_hash():
