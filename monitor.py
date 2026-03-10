@@ -70,31 +70,27 @@ def save_hash(h):
         f.write(h)
 
 def summarize(raw_text):
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com/tdlc-monitor",
-        "X-Title": "TDLC Monitor"
-    }
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    headers = {"Content-Type": "application/json"}
+    params = {"key": os.environ["GEMINI_API_KEY"]}
     body = {
-        "model": "meta-llama/llama-3.2-3b-instruct:free",
-        "messages": [{
-            "role": "user",
-            "content": (
-                f"Eres un asistente juridico. A continuacion esta el estado diario del "
-                f"TDLC (Tribunal de Defensa de la Libre Competencia de Chile) del {date.today().strftime('%d/%m/%Y')}.\n\n"
-                f"Lista cada causa con su numero de rol, las partes involucradas y la cantidad de tramites realizados hoy. "
-                f"Usa vinetas. Maximo 300 palabras. Responde en espanol con tildes correctas.\n\nCONTENIDO:\n{raw_text[:8000]}"
-            )
+        "contents": [{
+            "parts": [{
+                "text": (
+                    f"Eres un asistente juridico. A continuacion esta el estado diario del "
+                    f"TDLC (Tribunal de Defensa de la Libre Competencia de Chile) del {date.today().strftime('%d/%m/%Y')}.\n\n"
+                    f"Lista cada causa con su numero de rol, las partes involucradas y la cantidad de tramites realizados hoy. "
+                    f"Usa vinetas. Maximo 300 palabras. Responde en espanol con tildes correctas.\n\nCONTENIDO:\n{raw_text[:8000]}"
+                )
+            }]
         }]
     }
-    r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=body)
+    r = requests.post(url, headers=headers, params=params, json=body)
     data = r.json()
-    print("OpenRouter response:", data)
-    if "choices" in data:
-        return data["choices"][0]["message"]["content"]
+    print("Gemini response:", data)
+    if "candidates" in data:
+        return data["candidates"][0]["content"]["parts"][0]["text"]
     else:
-        # Si falla la IA, enviar el texto crudo directamente
         return raw_text[:1200]
 
 def send_whatsapp(message):
