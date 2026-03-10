@@ -21,7 +21,6 @@ def fetch_tdlc():
             try:
                 if "byestadodiario" in response.url:
                     data = response.json()
-                    print("Muestra causa[0]:", str(data[0])[:500])
                     causas_data.extend(data)
             except:
                 pass
@@ -51,20 +50,9 @@ def fetch_tdlc():
         rol = causa.get('rol', 'Sin ROL')
         descripcion = causa.get('descripcion', 'Sin descripción')
         n_tramites = causa.get('tramites', 0)
-
         resultado += f"ROL: {rol}\n"
         resultado += f"Carátula: {descripcion}\n"
         resultado += f"Trámites hoy: {n_tramites}\n\n"
-
-        if tramites:
-            for t in tramites:
-                tipo = t.get('tipoTramite', {}).get('name', 'Sin tipo') if isinstance(t.get('tipoTramite'), dict) else 'Sin tipo'
-                fecha = t.get('fechaTramite', '')[:10] if t.get('fechaTramite') else ''
-                resultado += f"  → {tipo} ({fecha})\n"
-        else:
-            resultado += "  → Sin trámites detallados\n"
-
-        resultado += "\n"
 
     return resultado
 
@@ -95,7 +83,7 @@ def summarize(raw_text):
             "content": (
                 f"Eres un asistente juridico. A continuacion esta el estado diario del "
                 f"TDLC (Tribunal de Defensa de la Libre Competencia de Chile) del {date.today().strftime('%d/%m/%Y')}.\n\n"
-                f"Lista cada causa con su numero de rol, las partes involucradas y el tipo de actuacion o resolucion. "
+                f"Lista cada causa con su numero de rol, las partes involucradas y la cantidad de tramites realizados hoy. "
                 f"Usa vinetas. Maximo 300 palabras. Responde en espanol con tildes correctas.\n\nCONTENIDO:\n{raw_text[:8000]}"
             )
         }]
