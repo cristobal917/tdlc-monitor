@@ -10,39 +10,27 @@ CALLMEBOT_APIKEY   = os.environ["CALLMEBOT_APIKEY"]
 OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
 HASH_FILE          = "last_hash.txt"
 
-def fetch_tramites(causa_id, session_headers):
-    url = f"https://consultas.tdlc.cl/rest/tramite/byorden/{causa_id}"
-    try:
-        r = requests.get(url, headers=session_headers, timeout=10)
-        print(f"Trámites {causa_id} status: {r.status_code} - respuesta: {r.text[:200]}")
-        return r.json()
-    except Exception as e:
-        print(f"Error tramites {causa_id}: {e}")
-        return []
-
 def fetch_tdlc():
     with sync_playwright() as p:
         browser = p.chromium.launch()
         context = browser.new_context()
 
         causas_data = []
-        cookies_capturadas = {}
 
         def handle_response(response):
-    try:
-        if "byestadodiario" in response.url:
-            data = response.json()
-            print("Muestra causa[0]:", str(data[0])[:500])
-            causas_data.extend(data)
-    except:
-        pass
+            try:
+                if "byestadodiario" in response.url:
+                    data = response.json()
+                    print("Muestra causa[0]:", str(data[0])[:500])
+                    causas_data.extend(data)
+            except:
+                pass
 
         page = context.new_page()
         page.on("response", handle_response)
         page.goto("https://consultas.tdlc.cl/estadoDiario", wait_until="networkidle")
         page.wait_for_timeout(3000)
 
-        # Hacer clic en detalle
         try:
             detalle_icon = page.query_selector(".glyphicon-new-window")
             if detalle_icon:
@@ -51,17 +39,7 @@ def fetch_tdlc():
         except Exception as e:
             print("Error al hacer clic:", e)
 
-        # Capturar cookies para usarlas en requests
-        cookies = context.cookies()
         browser.close()
-
-    # Construir headers con cookies
-    cookie_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies])
-    session_headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Cookie": cookie_str,
-        "Referer": "https://consultas.tdlc.cl/estadoDiario"
-    }
 
     if not causas_data:
         return "No se encontraron causas"
@@ -72,13 +50,11 @@ def fetch_tdlc():
     for causa in causas_data:
         rol = f"{causa.get('procedimiento', {}).get('iniciales', '')}-{causa.get('folio', '')}-{causa.get('anio', '')}"
         descripcion = causa.get('descripcion', 'Sin descripción')
-        causa_id = causa.get('idOrdenTrabajo')
+        tramites = causa.get('tramites', [])
 
         resultado += f"ROL: {rol}\n"
         resultado += f"Carátula: {descripcion}\n"
 
-        # Obtener trámites de esta causa
-        tramites = fetch_tramites(causa_id, session_headers)
         if tramites:
             for t in tramites:
                 tipo = t.get('tipoTramite', {}).get('name', 'Sin tipo') if isinstance(t.get('tipoTramite'), dict) else 'Sin tipo'
@@ -130,9 +106,8 @@ def summarize(raw_text):
 def send_whatsapp(message):
     max_chars = 1500
     partes = []
-    
+
     while len(message) > max_chars:
-        # Cortar en el último salto de línea antes del límite
         corte = message[:max_chars].rfind("\n")
         if corte == -1:
             corte = max_chars
@@ -149,7 +124,7 @@ def send_whatsapp(message):
         )
         r = requests.get(url)
         print(f"WhatsApp parte {i+1}/{total} status:", r.status_code)
-        time.sleep(3)  # esperar entre mensajes para no saturar
+        time.sleep(3)
 
 if __name__ == "__main__":
     print("Verificando TDLC...")
