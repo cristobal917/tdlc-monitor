@@ -143,7 +143,10 @@ if __name__ == "__main__":
     print("Verificando TDLC...")
     raw = fetch_tdlc()
     print("Texto extraído:", raw[:300])
-    current_hash = get_hash(raw)
+
+    # Excluir la primera línea (fecha) del hash para evitar falsos cambios
+    raw_sin_fecha = "\n".join(raw.split("\n")[1:])
+    current_hash = get_hash(raw_sin_fecha)
 
     if current_hash == load_last_hash():
         print("Sin cambios.")
