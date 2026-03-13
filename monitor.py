@@ -27,7 +27,7 @@ def fetch_tdlc():
 
         page = context.new_page()
         page.on("response", handle_response)
-        page.goto("https://consultas.tdlc.cl/estadoDiario", wait_until="networkidle")
+        page.goto("https://consultas.tdlc.cl/estadoDiario", wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(3000)
 
         try:
