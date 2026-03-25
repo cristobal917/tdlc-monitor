@@ -24,9 +24,8 @@ def fetch_tdlc():
 
         page = context.new_page()
         page.on("response", handle_response)
-        page.goto("https://consultas.tdlc.cl/estadoDiario", wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(10000)
-        print("HTML body:", page.inner_text("body")[:500])
+        page.goto("https://consultas.tdlc.cl/estadoDiario", wait_until="networkidle", timeout=60000)
+        page.wait_for_timeout(3000)
 
         try:
             detalle_icon = page.wait_for_selector(".glyphicon-new-window", timeout=15000)
