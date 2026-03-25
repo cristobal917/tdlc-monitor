@@ -28,13 +28,16 @@ def fetch_tdlc():
         page = context.new_page()
         page.on("response", handle_response)
         page.goto("https://consultas.tdlc.cl/estadoDiario", wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(3000)
+        page.wait_for_timeout(6000)
 
         try:
-            detalle_icon = page.query_selector(".glyphicon-new-window")
+            detalle_icon = page.wait_for_selector(".glyphicon-new-window", timeout=15000)
             if detalle_icon:
                 detalle_icon.click()
-                page.wait_for_timeout(3000)
+                page.wait_for_timeout(6000)
+                print("Clic en detalle realizado")
+            else:
+                print("No se encontró ícono de detalle")
         except Exception as e:
             print("Error al hacer clic:", e)
 
