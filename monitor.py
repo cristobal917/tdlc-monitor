@@ -5,10 +5,7 @@ from datetime import date
 import requests
 from playwright.sync_api import sync_playwright
 
-CALLMEBOT_PHONE    = os.environ["CALLMEBOT_PHONE"]
-CALLMEBOT_APIKEY   = os.environ["CALLMEBOT_APIKEY"]
-OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
-HASH_FILE          = "last_hash.txt"
+HASH_FILE = "last_hash.txt"
 
 def fetch_tdlc():
     with sync_playwright() as p:
@@ -37,8 +34,6 @@ def fetch_tdlc():
                 detalle_icon.click()
                 page.wait_for_timeout(6000)
                 print("Clic en detalle realizado")
-            else:
-                print("No se encontró ícono de detalle")
         except Exception as e:
             print("Error al hacer clic:", e)
 
@@ -73,30 +68,6 @@ def save_hash(h):
     with open(HASH_FILE, "w") as f:
         f.write(h)
 
-def summarize(raw_text):
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
-    headers = {"Content-Type": "application/json"}
-    params = {"key": os.environ["GEMINI_API_KEY"]}
-    body = {
-        "contents": [{
-            "parts": [{
-                "text": (
-                    f"Eres un asistente juridico. A continuacion esta el estado diario del "
-                    f"TDLC (Tribunal de Defensa de la Libre Competencia de Chile) del {date.today().strftime('%d/%m/%Y')}.\n\n"
-                    f"Lista cada causa con su numero de rol, las partes involucradas y la cantidad de tramites realizados hoy. "
-                    f"Usa vinetas. Maximo 300 palabras. Responde en espanol con tildes correctas.\n\nCONTENIDO:\n{raw_text[:8000]}"
-                )
-            }]
-        }]
-    }
-    r = requests.post(url, headers=headers, params=params, json=body)
-    data = r.json()
-    print("Gemini response:", data)
-    if "candidates" in data:
-        return data["candidates"][0]["content"]["parts"][0]["text"]
-    else:
-        return raw_text
-
 def send_telegram(message):
     max_chars = 4000
     partes = []
@@ -120,39 +91,14 @@ def send_telegram(message):
         print(f"Telegram parte {i+1}/{total} enviado")
         time.sleep(1)
 
-def send_whatsapp(message):
-    max_chars = 1500
-    partes = []
-
-    while len(message) > max_chars:
-        corte = message[:max_chars].rfind("\n")
-        if corte == -1:
-            corte = max_chars
-        partes.append(message[:corte])
-        message = message[corte:].strip()
-    partes.append(message)
-
-    total = len(partes)
-    for i, parte in enumerate(partes):
-        encabezado = f"📋 Parte {i+1}/{total}\n\n" if total > 1 else ""
-        url = (
-            f"https://api.callmebot.com/whatsapp.php"
-            f"?phone={CALLMEBOT_PHONE}&text={requests.utils.quote(encabezado + parte)}&apikey={CALLMEBOT_APIKEY}"
-        )
-        r = requests.get(url)
-        print(f"WhatsApp parte {i+1}/{total} status:", r.status_code)
-        time.sleep(3)
-
 if __name__ == "__main__":
     print("Verificando TDLC...")
     raw = fetch_tdlc()
     print("Texto extraído:", raw[:300])
 
-    # Ignorar si no hay causas
     if "No se encontraron causas" in raw:
         print("Página vacía, ignorando.")
     else:
-        # Excluir la primera línea (fecha) del hash
         raw_sin_fecha = "\n".join(raw.split("\n")[1:])
         current_hash = get_hash(raw_sin_fecha)
 
@@ -160,9 +106,5 @@ if __name__ == "__main__":
             print("Sin cambios.")
         else:
             print("¡Contenido nuevo! Enviando resumen...")
-            summary = summarize(raw)
-            mensaje = f"🔔 TDLC {date.today().strftime('%d/%m/%Y')}\n\n{summary}"
-            send_telegram(mensaje)
-            send_email(mensaje)
-            save_hash(current_hash)
-            print("Listo.")
+            mensaje = f"🔔 TDLC {date.today().strftime('%d/%m/%Y')}\n\n{raw}"
+            sen
