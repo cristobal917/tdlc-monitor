@@ -144,17 +144,21 @@ if __name__ == "__main__":
     raw = fetch_tdlc()
     print("Texto extraído:", raw[:300])
 
-    # Excluir la primera línea (fecha) del hash para evitar falsos cambios
-    raw_sin_fecha = "\n".join(raw.split("\n")[1:])
-    current_hash = get_hash(raw_sin_fecha)
-
-    if current_hash == load_last_hash():
-        print("Sin cambios.")
+    # Ignorar si no hay causas
+    if "No se encontraron causas" in raw:
+        print("Página vacía, ignorando.")
     else:
-        print("¡Contenido nuevo! Enviando resumen...")
-        summary = summarize(raw)
-        mensaje = f"🔔 TDLC {date.today().strftime('%d/%m/%Y')}\n\n{summary}"
-        send_telegram(mensaje)
-        send_whatsapp(mensaje)
-        save_hash(current_hash)
-        print("Listo.")
+        # Excluir la primera línea (fecha) del hash
+        raw_sin_fecha = "\n".join(raw.split("\n")[1:])
+        current_hash = get_hash(raw_sin_fecha)
+
+        if current_hash == load_last_hash():
+            print("Sin cambios.")
+        else:
+            print("¡Contenido nuevo! Enviando resumen...")
+            summary = summarize(raw)
+            mensaje = f"🔔 TDLC {date.today().strftime('%d/%m/%Y')}\n\n{summary}"
+            send_telegram(mensaje)
+            send_email(mensaje)
+            save_hash(current_hash)
+            print("Listo.")
