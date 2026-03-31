@@ -134,5 +134,6 @@ if __name__ == "__main__":
             print("¡Contenido nuevo! Enviando resumen...")
             mensaje = f"🔔 TDLC {date.today().strftime('%d/%m/%Y')}\n\n{raw}"
             send_telegram(mensaje)
+            send_email(mensaje)
             save_hash(current_hash)
             print("Listo.")
