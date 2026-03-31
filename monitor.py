@@ -101,6 +101,22 @@ def send_telegram(message):
         print(f"Telegram parte {i+1}/{total} enviado")
         time.sleep(1)
 
+def send_email(message):
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+
+    msg = MIMEMultipart()
+    msg["From"]    = os.environ["EMAIL_FROM"]
+    msg["To"]      = os.environ["EMAIL_TO"]
+    msg["Subject"] = f"TDLC Estado Diario {date.today().strftime('%d/%m/%Y')}"
+    msg.attach(MIMEText(message, "plain", "utf-8"))
+
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(os.environ["EMAIL_FROM"], os.environ["GMAIL_PASSWORD"])
+        server.sendmail(os.environ["EMAIL_FROM"], os.environ["EMAIL_TO"], msg.as_string())
+    print("Email enviado")
+
 if __name__ == "__main__":
     print("Verificando TDLC...")
     raw = fetch_tdlc()
