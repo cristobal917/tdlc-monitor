@@ -48,9 +48,12 @@ def fetch_tdlc():
         rol = causa.get('rol', 'Sin ROL')
         descripcion = causa.get('descripcion', 'Sin descripción')
         n_tramites = causa.get('tramites', 0)
+        id_causa = causa.get('id', '')
+        link = f"https://consultas.tdlc.cl/expediente/{rol}" if rol else ""
         resultado += f"ROL: {rol}\n"
         resultado += f"Carátula: {descripcion}\n"
-        resultado += f"Trámites hoy: {n_tramites}\n\n"
+        resultado += f"Trámites hoy: {n_tramites}\n"
+        resultado += f"🔗 {link}\n\n"
 
     return resultado
 
