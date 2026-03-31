@@ -37,33 +37,16 @@ def fetch_tdlc():
         except Exception as e:
             print("Error al hacer clic:", e)
 
-        # Capturar uuid haciendo clic en cada causa
+        # Capturar uuid desde el HTML
         try:
-            filas = page.query_selector_all("table tbody tr")
-            print(f"Filas encontradas: {len(filas)}")
-            for fila in filas:
-                try:
-                    boton = fila.query_selector(".glyphicon-eye-open, .glyphicon-new-window, a, button")
-                    if boton:
-                        with context.expect_page() as new_page_info:
-                            boton.click()
-                        new_page = new_page_info.value
-                        new_page.wait_for_load_state("domcontentloaded")
-                        url = new_page.url
-                        print("URL causa:", url)
-                        if "uuid=" in url and "idCausa=" in url:
-                            from urllib.parse import urlparse, parse_qs
-                            params = parse_qs(urlparse(url).query)
-                            id_causa = params.get("idCausa", [None])[0]
-                            uuid = params.get("uuid", [None])[0]
-                            if id_causa and uuid:
-                                uuid_map[id_causa] = uuid
-                        new_page.close()
-                except Exception as e:
-                    print("Error en fila:", e)
+            import re
+            html = page.content()
+            uuids = re.findall(r'idCausa=(\d+)&uuid=([\w-]+)', html)
+            for id_causa, uuid in uuids:
+                uuid_map[id_causa] = uuid
+            print(f"UUIDs encontrados: {len(uuid_map)}")
         except Exception as e:
             print("Error capturando uuids:", e)
-
         print("UUID map:", uuid_map)
         browser.close()
 
