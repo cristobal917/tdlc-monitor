@@ -60,20 +60,9 @@ def fetch_tdlc():
         rol = causa.get('rol', 'Sin ROL')
         descripcion = causa.get('descripcion', 'Sin descripción')
         n_tramites = causa.get('tramites', 0)
-        id_causa = str(causa.get('id', ''))
+        resultado += f"• {rol} — {descripcion} ({n_tramites} trámite{'s' if n_tramites != 1 else ''})\n"
 
-        if id_causa in uuid_map:
-            link = f"https://consultas.tdlc.cl/estadoDiario?idCausa={id_causa}&uuid={uuid_map[id_causa]}"
-        else:
-            link = ""
-
-        resultado += f"ROL: {rol}\n"
-        resultado += f"Carátula: {descripcion}\n"
-        resultado += f"Trámites hoy: {n_tramites}\n"
-        if link:
-            resultado += f"🔗 {link}\n"
-        resultado += "\n"
-
+    resultado += f"\n🔗 https://consultas.tdlc.cl/estadoDiario"
     return resultado
 
 def get_hash(text):
