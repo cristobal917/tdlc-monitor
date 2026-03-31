@@ -53,10 +53,8 @@ def fetch_tdlc():
         id_causa = causa.get('id', causa.get('idOrdenTrabajo', ''))
         uuid = causa.get('uuid', causa.get('UUID', ''))
         
-        if id_causa and uuid:
-            link = f"https://consultas.tdlc.cl/estadoDiario?idCausa={id_causa}&uuid={uuid}"
-        else:
-            link = f"https://consultas.tdlc.cl/expediente/{rol}"
+        proc_id = causa.get('procedimiento', {}).get('id', 3)
+        link = f"https://consultas.tdlc.cl/do_search?proc={proc_id}&idCausa={id_causa}&buscador=true"
         
         resultado += f"ROL: {rol}\n"
         resultado += f"Carátula: {descripcion}\n"
