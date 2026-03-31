@@ -74,17 +74,9 @@ def fetch_tdlc():
         rol = causa.get('rol', 'Sin ROL')
         descripcion = causa.get('descripcion', 'Sin descripción')
         n_tramites = causa.get('tramites', 0)
-        id_causa = str(causa.get('id', ''))
-
-        if id_causa in uuid_map:
-            link = f"https://consultas.tdlc.cl/estadoDiario?idCausa={id_causa}&uuid={uuid_map[id_causa]}"
-        else:
-            link = f"https://consultas.tdlc.cl/do_search?proc={causa.get('procedimiento', {}).get('id', 3)}&idCausa={id_causa}&buscador=true"
-
         resultado += f"ROL: {rol}\n"
         resultado += f"Carátula: {descripcion}\n"
-        resultado += f"Trámites hoy: {n_tramites}\n"
-        resultado += f"🔗 {link}\n\n"
+        resultado += f"Trámites hoy: {n_tramites}\n\n"
 
     return resultado
 
