@@ -13,14 +13,21 @@ def fetch_tdlc():
         context = browser.new_context()
 
         causas_data = []
+        uuid_map = {}  # idCausa -> uuid
 
         def handle_response(response):
             try:
                 if "byestadodiario" in response.url:
                     data = response.json()
-                    print("Campos causa[0]:", list(data[0].keys()))
-                    print("Causa[0] completa:", str(data[0]))
                     causas_data.extend(data)
+                # Interceptar URLs con uuid
+                if "uuid=" in response.url and "idCausa=" in response.url:
+                    from urllib.parse import urlparse, parse_qs
+                    params = parse_qs(urlparse(response.url).query)
+                    id_causa = params.get("idCausa", [None])[0]
+                    uuid = params.get("uuid", [None])[0]
+                    if id_causa and uuid:
+                        uuid_map[id_causa] = uuid
             except:
                 pass
 
@@ -38,6 +45,23 @@ def fetch_tdlc():
         except Exception as e:
             print("Error al hacer clic:", e)
 
+        # Intentar hacer clic en cada causa para capturar su uuid
+        try:
+            links_causa = page.query_selector_all("table a, td a, .glyphicon-eye-open")
+            print(f"Links encontrados: {len(links_causa)}")
+            for link in links_causa[:3]:  # solo primeros 3 para no demorar
+                href = link.get_attribute("href") or ""
+                if "uuid=" in href and "idCausa=" in href:
+                    from urllib.parse import urlparse, parse_qs
+                    params = parse_qs(urlparse(href).query)
+                    id_causa = params.get("idCausa", [None])[0]
+                    uuid = params.get("uuid", [None])[0]
+                    if id_causa and uuid:
+                        uuid_map[id_causa] = uuid
+        except Exception as e:
+            print("Error capturando links:", e)
+
+        print("UUID map:", uuid_map)
         browser.close()
 
     if not causas_data:
@@ -50,12 +74,13 @@ def fetch_tdlc():
         rol = causa.get('rol', 'Sin ROL')
         descripcion = causa.get('descripcion', 'Sin descripción')
         n_tramites = causa.get('tramites', 0)
-        id_causa = causa.get('id', causa.get('idOrdenTrabajo', ''))
-        uuid = causa.get('uuid', causa.get('UUID', ''))
-        
-        proc_id = causa.get('procedimiento', {}).get('id', 3)
-        link = f"https://consultas.tdlc.cl/do_search?proc={proc_id}&idCausa={id_causa}&buscador=true"
-        
+        id_causa = str(causa.get('id', ''))
+
+        if id_causa in uuid_map:
+            link = f"https://consultas.tdlc.cl/estadoDiario?idCausa={id_causa}&uuid={uuid_map[id_causa]}"
+        else:
+            link = f"https://consultas.tdlc.cl/do_search?proc={causa.get('procedimiento', {}).get('id', 3)}&idCausa={id_causa}&buscador=true"
+
         resultado += f"ROL: {rol}\n"
         resultado += f"Carátula: {descripcion}\n"
         resultado += f"Trámites hoy: {n_tramites}\n"
