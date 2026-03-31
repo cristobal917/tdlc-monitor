@@ -18,6 +18,8 @@ def fetch_tdlc():
             try:
                 if "byestadodiario" in response.url:
                     data = response.json()
+                    print("Campos causa[0]:", list(data[0].keys()))
+                    print("Causa[0] completa:", str(data[0]))
                     causas_data.extend(data)
             except:
                 pass
