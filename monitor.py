@@ -60,9 +60,9 @@ def fetch_tdlc():
         rol = causa.get('rol', 'Sin ROL')
         descripcion = causa.get('descripcion', 'Sin descripción')
         n_tramites = causa.get('tramites', 0)
-        resultado += f"• {rol} — {descripcion} ({n_tramites} trámite{'s' if n_tramites != 1 else ''})\n"
+        resultado += f"• {rol} — {descripcion} ({n_tramites} trámite{'s' if n_tramites != 1 else ''})\n\n"
 
-    resultado += f"\n🔗 https://consultas.tdlc.cl/estadoDiario"
+    resultado += f"🔗 https://consultas.tdlc.cl/estadoDiario"
     return resultado
 
 def get_hash(text):
