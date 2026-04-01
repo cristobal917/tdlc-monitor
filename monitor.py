@@ -106,16 +106,18 @@ def send_email(message):
     from email.mime.text import MIMEText
     from email.mime.multipart import MIMEMultipart
 
+    destinatarios = os.environ["EMAIL_TO"].split(",")
+
     msg = MIMEMultipart()
     msg["From"]    = os.environ["EMAIL_FROM"]
-    msg["To"]      = os.environ["EMAIL_TO"]
+    msg["To"]      = ", ".join(destinatarios)
     msg["Subject"] = f"TDLC Estado Diario {date.today().strftime('%d/%m/%Y')}"
     msg.attach(MIMEText(message, "plain", "utf-8"))
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(os.environ["EMAIL_FROM"], os.environ["GMAIL_PASSWORD"])
-        server.sendmail(os.environ["EMAIL_FROM"], os.environ["EMAIL_TO"], msg.as_string())
-    print("Email enviado")
+        server.sendmail(os.environ["EMAIL_FROM"], destinatarios, msg.as_string())
+    print(f"Email enviado a {len(destinatarios)} destinatarios")
 
 if __name__ == "__main__":
     print("Verificando TDLC...")
