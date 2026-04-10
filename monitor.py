@@ -1,230 +1,87 @@
 import os
 import hashlib
 import time
-import json
+from datetime import date
 import requests
-import datetime as dt
-import pdfplumber
 from playwright.sync_api import sync_playwright
 
 HASH_FILE = "last_hash.txt"
-URL_BASE = "https://consultas.tdlc.cl"
 
-# ── Fecha de hoy en Chile (UTC-4) ─────────────────────────────────────────────
-hoy_chile = dt.datetime.now() - dt.timedelta(hours=4)
-HOY_MS = int(dt.datetime(hoy_chile.year, hoy_chile.month, hoy_chile.day,
-             tzinfo=dt.timezone.utc).timestamp() * 1000)
-
-# ── Descarga PDF con requests usando cookies de Playwright ────────────────────
-def descargar_pdf(cookies_dict, url_pdf):
-    session = requests.Session()
-    for name, value in cookies_dict.items():
-        session.cookies.set(name, value)
-    session.headers.update({"User-Agent": "Mozilla/5.0", "Referer": URL_BASE})
-    try:
-        resp = session.get(url_pdf, timeout=30)
-        if resp.status_code == 200 and resp.content[:4] == b'%PDF':
-            with open("temp_resolucion.pdf", "wb") as f:
-                f.write(resp.content)
-            texto = ""
-            with pdfplumber.open("temp_resolucion.pdf") as pdf:
-                for p in pdf.pages:
-                    t = p.extract_text()
-                    if t:
-                        texto += t + "\n"
-            return texto.strip()
-        return None
-    except Exception as e:
-        print(f"  Error descargando PDF: {e}")
-        return None
-
-# ── Función principal de scraping ─────────────────────────────────────────────
 def fetch_tdlc():
-    resultados = []
-
     with sync_playwright() as p:
         browser = p.chromium.launch()
         context = browser.new_context()
 
-        # ── Interceptar respuesta de causas del estado diario ─────────────────
-        causas_modal = []
+        causas_data = []
+        uuid_map = {}
+
         def handle_response(response):
             try:
-                if "byestadodiario" in response.url or "estadodiario" in response.url.lower():
+                if "byestadodiario" in response.url:
                     data = response.json()
-                    if isinstance(data, list):
-                        causas_modal.extend(data)
+                    causas_data.extend(data)
             except:
                 pass
 
         page = context.new_page()
         page.on("response", handle_response)
-        page.goto(f"{URL_BASE}/estadoDiario", wait_until="networkidle", timeout=60000)
-        page.wait_for_timeout(5000)
+        page.goto("https://consultas.tdlc.cl/estadoDiario", wait_until="networkidle", timeout=60000)
+        page.wait_for_timeout(3000)
 
-        # ── Abrir modal del día ───────────────────────────────────────────────
         try:
             detalle_icon = page.wait_for_selector(".glyphicon-new-window", timeout=15000)
-            detalle_icon.click()
-            page.wait_for_timeout(4000)
-            print("✅ Modal abierto")
+            if detalle_icon:
+                detalle_icon.click()
+                page.wait_for_timeout(6000)
+                print("Clic en detalle realizado")
         except Exception as e:
-            print(f"Error abriendo modal: {e}")
-            browser.close()
-            return []
+            print("Error al hacer clic:", e)
 
-        # ── Leer causas del modal ─────────────────────────────────────────────
-        filas = page.query_selector_all("#showDetalle tbody tr")
-        causas = []
-        for fila in filas:
-            celdas = fila.query_selector_all("td")
-            if len(celdas) >= 2:
-                causas.append({
-                    "rol":      celdas[0].inner_text().strip(),
-                    "caratula": celdas[1].inner_text().strip()
-                })
-        print(f"✅ {len(causas)} causas en el estado diario de hoy")
-
-        # ── Entrar a cada causa ───────────────────────────────────────────────
-        for i, causa in enumerate(causas):
-            print(f"\n📂 [{i+1}/{len(causas)}] {causa['rol']}")
-
-            # Reabrir modal para obtener idCausa
-            page.goto(f"{URL_BASE}/estadoDiario", wait_until="networkidle", timeout=60000)
-            page.wait_for_timeout(5000)
-            iconos = page.query_selector_all(".glyphicon-new-window")
-            iconos[0].click()
-            page.wait_for_timeout(4000)
-
-            spans_causa = page.query_selector_all("#showDetalle tbody tr td span.glyphicon-new-window")
-            if i >= len(spans_causa):
-                continue
-
-            # Capturar nueva página al hacer clic
-            with context.expect_page() as nueva_page_info:
-                spans_causa[i].click()
-            nueva_page = nueva_page_info.value
-            nueva_page.wait_for_load_state("networkidle", timeout=30000)
-            nueva_page.wait_for_timeout(8000)
-
-            url_causa = nueva_page.url
-            id_causa = url_causa.split("idCausa=")[-1].split("&")[0] if "idCausa=" in url_causa else None
-            print(f"  idCausa: {id_causa} | URL: {url_causa}")
-
-            # Capturar idCuaderno desde llamadas de red
-            id_cuaderno = None
-            requests_capturados = []
-
-            def capturar_request(request):
-                if "bloqueadossummary" in request.url:
-                    requests_capturados.append(request.url)
-
-            nueva_page.on("request", capturar_request)
-            nueva_page.reload(wait_until="networkidle", timeout=30000)
-            nueva_page.wait_for_timeout(10000)
-
-            for url_req in requests_capturados:
-                partes = url_req.split("/")
-                if "bloqueadossummary" in partes:
-                    idx = partes.index("bloqueadossummary")
-                    id_cuaderno = partes[idx + 1]
-                    break
-
-            print(f"  idCuaderno: {id_cuaderno}")
-            if not id_cuaderno:
-                nueva_page.close()
-                continue
-
-            # Obtener cookies para descargar PDFs
-            cookies_raw = context.cookies()
-            cookies_dict = {c["name"]: c["value"] for c in cookies_raw}
-
-            # Consultar API de trámites
-            resp_raw = nueva_page.evaluate(f"""() => {{
-                var xhr = new XMLHttpRequest();
-                xhr.open('GET', '{URL_BASE}/rest/tramite/bloqueadossummary/{id_cuaderno}/10000/1/true/false', false);
-                xhr.setRequestHeader('Accept', 'application/json');
-                xhr.send();
-                return xhr.responseText;
-            }}""")
-
-            try:
-                data = json.loads(resp_raw)
-                tramites = data.get("results", data) if isinstance(data, dict) else data
-            except:
-                print("  ❌ Error JSON")
-                nueva_page.close()
-                continue
-
-            # Filtrar resoluciones de hoy
-            resoluciones_hoy = [
-                t for t in tramites
-                if isinstance(t, dict)
-                and t.get("tipoTramite") == "Resolución"
-                and t.get("fecha", 0) >= HOY_MS
-            ]
-            print(f"  Resoluciones de hoy: {len(resoluciones_hoy)}")
-
-            # Descargar PDF de cada resolución
-            for tramite in resoluciones_hoy:
-                id_enc     = tramite.get("idDocumentoEncriptado")
-                referencia = tramite.get("referencia", "sin referencia")
-                fecha_dt   = dt.datetime.fromtimestamp(tramite.get("fecha", 0) / 1000)
-                print(f"  📄 {referencia} | {fecha_dt}")
-
-                if not id_enc:
-                    continue
-
-                url_pdf = f"{URL_BASE}/download/{id_enc}?inlineifpossible=true"
-                texto = descargar_pdf(cookies_dict, url_pdf)
-
-                if texto:
-                    print(f"  ✅ PDF extraído ({len(texto)} chars)")
-                    resultados.append({
-                        "rol":        causa["rol"],
-                        "caratula":   causa["caratula"],
-                        "referencia": referencia,
-                        "fecha":      fecha_dt.strftime("%d/%m/%Y %H:%M"),
-                        "contenido":  texto
-                    })
-                else:
-                    print(f"  ⚠️ No se pudo descargar PDF")
-
-            nueva_page.close()
-
+        # Capturar uuid desde el HTML
+        try:
+            import re
+            html = page.content()
+            uuids = re.findall(r'idCausa=(\d+)&uuid=([\w-]+)', html)
+            for id_causa, uuid in uuids:
+                uuid_map[id_causa] = uuid
+            print(f"UUIDs encontrados: {len(uuid_map)}")
+        except Exception as e:
+            print("Error capturando uuids:", e)
+        print("UUID map:", uuid_map)
         browser.close()
 
-    return resultados
+    if not causas_data:
+        return "No se encontraron causas"
 
-# ── Formatear mensaje ─────────────────────────────────────────────────────────
-def formatear_mensaje(resultados):
-    hoy = hoy_chile.strftime("%d/%m/%Y")
-    if not resultados:
-        return f"📋 TDLC Estado Diario {hoy}\n\nNo se encontraron resoluciones nuevas hoy."
+    resultado = f"Estado Diario TDLC - {date.today().strftime('%d/%m/%Y')}\n"
+    resultado += f"Total causas: {len(causas_data)}\n\n"
 
-    msg = f"📋 TDLC — Estado Diario {hoy}\n"
-    msg += f"{'='*50}\n\n"
-    msg += f"Se encontraron {len(resultados)} resolución(es):\n\n"
+    for causa in causas_data:
+        rol = causa.get('rol', 'Sin ROL')
+        descripcion = causa.get('descripcion', 'Sin descripción')
+        n_tramites = causa.get('tramites', 0)
+        resultado += f"• {rol} — {descripcion} ({n_tramites} trámite{'s' if n_tramites != 1 else ''})\n\n"
 
-    for i, r in enumerate(resultados, 1):
-        msg += f"{'─'*50}\n"
-        msg += f"📁 {r['rol']}\n"
-        msg += f"📌 {r['caratula']}\n"
-        msg += f"⚖️  {r['referencia']}\n"
-        msg += f"🕐 {r['fecha']}\n\n"
-        # Primeros 800 chars del texto del PDF para el mensaje
-        extracto = r["contenido"][:800]
-        if len(r["contenido"]) > 800:
-            extracto += "...\n[Texto completo en el archivo adjunto]"
-        msg += extracto + "\n\n"
+    resultado += f"🔗 https://consultas.tdlc.cl/estadoDiario"
+    return resultado
 
-    msg += f"🔗 {URL_BASE}/estadoDiario"
-    return msg
+def get_hash(text):
+    return hashlib.md5(text.encode()).hexdigest()
 
-# ── Telegram ──────────────────────────────────────────────────────────────────
+def load_last_hash():
+    if os.path.exists(HASH_FILE):
+        with open(HASH_FILE, "r") as f:
+            return f.read().strip()
+    return ""
+
+def save_hash(h):
+    with open(HASH_FILE, "w") as f:
+        f.write(h)
+
 def send_telegram(message):
     max_chars = 4000
     partes = []
+
     while len(message) > max_chars:
         corte = message[:max_chars].rfind("\n")
         if corte == -1:
@@ -241,83 +98,44 @@ def send_telegram(message):
             "chat_id": os.environ["TELEGRAM_CHAT_ID"],
             "text": encabezado + parte
         })
-        print(f"Telegram parte {i+1}/{total} enviada")
+        print(f"Telegram parte {i+1}/{total} enviado")
         time.sleep(1)
 
-# ── Email con PDF adjunto ─────────────────────────────────────────────────────
-def send_email(message, resultados):
+def send_email(message):
     import smtplib
     from email.mime.text import MIMEText
     from email.mime.multipart import MIMEMultipart
-    from email.mime.base import MIMEBase
-    from email import encoders
 
     destinatarios = os.environ["EMAIL_TO"].split(",")
-    hoy = hoy_chile.strftime("%d/%m/%Y")
 
     msg = MIMEMultipart()
     msg["From"]    = os.environ["EMAIL_FROM"]
     msg["To"]      = ", ".join(destinatarios)
-    msg["Subject"] = f"TDLC Estado Diario {hoy} — {len(resultados)} resolución(es)"
+    msg["Subject"] = f"TDLC Estado Diario {date.today().strftime('%d/%m/%Y')}"
     msg.attach(MIMEText(message, "plain", "utf-8"))
-
-    # Adjuntar TXT con texto completo de todas las resoluciones
-    if resultados:
-        txt_completo = f"ESTADO DIARIO TDLC — {hoy}\n{'='*70}\n\n"
-        for i, r in enumerate(resultados, 1):
-            txt_completo += f"RESOLUCIÓN {i}\n"
-            txt_completo += f"Causa:      {r['rol']}\n"
-            txt_completo += f"Carátula:   {r['caratula']}\n"
-            txt_completo += f"Resolución: {r['referencia']}\n"
-            txt_completo += f"Fecha:      {r['fecha']}\n"
-            txt_completo += f"{'─'*70}\n"
-            txt_completo += r["contenido"]
-            txt_completo += f"\n\n{'='*70}\n\n"
-
-        adjunto = MIMEBase("application", "octet-stream")
-        adjunto.set_payload(txt_completo.encode("utf-8"))
-        encoders.encode_base64(adjunto)
-        adjunto.add_header("Content-Disposition", f"attachment; filename=resoluciones_tdlc_{hoy_chile.strftime('%Y-%m-%d')}.txt")
-        msg.attach(adjunto)
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(os.environ["EMAIL_FROM"], os.environ["GMAIL_PASSWORD"])
         server.sendmail(os.environ["EMAIL_FROM"], destinatarios, msg.as_string())
-    print(f"Email enviado a {len(destinatarios)} destinatario(s)")
+    print(f"Email enviado a {len(destinatarios)} destinatarios")
 
-# ── Hash para detectar cambios ────────────────────────────────────────────────
-def get_hash(resultados):
-    contenido = json.dumps([{k: v for k, v in r.items() if k != "contenido"}
-                             for r in resultados], ensure_ascii=False, sort_keys=True)
-    return hashlib.md5(contenido.encode()).hexdigest()
-
-def load_last_hash():
-    if os.path.exists(HASH_FILE):
-        with open(HASH_FILE, "r") as f:
-            return f.read().strip()
-    return ""
-
-def save_hash(h):
-    with open(HASH_FILE, "w") as f:
-        f.write(h)
-
-# ── Main ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    print(f"Verificando TDLC — {hoy_chile.strftime('%d/%m/%Y %H:%M')}...")
+    print("Verificando TDLC...")
+    raw = fetch_tdlc()
+    print("Texto extraído:", raw[:300])
 
-    resultados = fetch_tdlc()
-
-    if not resultados:
-        print("Sin resoluciones nuevas hoy.")
+    if "No se encontraron causas" in raw:
+        print("Página vacía, ignorando.")
     else:
-        current_hash = get_hash(resultados)
+        raw_sin_fecha = "\n".join(raw.split("\n")[1:])
+        current_hash = get_hash(raw_sin_fecha)
 
         if current_hash == load_last_hash():
-            print("Sin cambios desde la última ejecución.")
+            print("Sin cambios.")
         else:
-            print(f"¡{len(resultados)} resolución(es) nueva(s)! Enviando notificaciones...")
-            mensaje = formatear_mensaje(resultados)
+            print("¡Contenido nuevo! Enviando resumen...")
+            mensaje = f"🔔 TDLC {date.today().strftime('%d/%m/%Y')}\n\n{raw}"
             send_telegram(mensaje)
-            send_email(mensaje, resultados)
+            send_email(mensaje)
             save_hash(current_hash)
-            print("✅ Listo.")
+            print("Listo.")
