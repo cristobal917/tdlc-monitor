@@ -15,7 +15,7 @@ hoy_chile = dt.datetime.now() - dt.timedelta(hours=4)
 HOY_MS = int(dt.datetime(hoy_chile.year, hoy_chile.month, hoy_chile.day,
              tzinfo=dt.timezone.utc).timestamp() * 1000)
 
-# ── Descarga PDF con requests usando cookies de Playwright ────────────────────
+# ── Descarga PDF con cookies de Playwright ────────────────────────────────────
 def descargar_pdf(cookies_dict, url_pdf):
     session = requests.Session()
     for name, value in cookies_dict.items():
@@ -38,7 +38,7 @@ def descargar_pdf(cookies_dict, url_pdf):
         print(f"  Error descargando PDF: {e}")
         return None
 
-# ── Función principal de scraping ─────────────────────────────────────────────
+# ── Scraping principal ────────────────────────────────────────────────────────
 def fetch_tdlc():
     resultados = []
 
@@ -46,23 +46,11 @@ def fetch_tdlc():
         browser = p.chromium.launch()
         context = browser.new_context()
 
-        # ── Interceptar respuesta de causas del estado diario ─────────────────
-        causas_modal = []
-        def handle_response(response):
-            try:
-                if "byestadodiario" in response.url or "estadodiario" in response.url.lower():
-                    data = response.json()
-                    if isinstance(data, list):
-                        causas_modal.extend(data)
-            except:
-                pass
-
         page = context.new_page()
-        page.on("response", handle_response)
         page.goto(f"{URL_BASE}/estadoDiario", wait_until="networkidle", timeout=60000)
         page.wait_for_timeout(5000)
 
-        # ── Abrir modal del día ───────────────────────────────────────────────
+        # Abrir modal del día
         try:
             detalle_icon = page.wait_for_selector(".glyphicon-new-window", timeout=15000)
             detalle_icon.click()
@@ -73,7 +61,7 @@ def fetch_tdlc():
             browser.close()
             return []
 
-        # ── Leer causas del modal ─────────────────────────────────────────────
+        # Leer causas del modal
         filas = page.query_selector_all("#showDetalle tbody tr")
         causas = []
         for fila in filas:
@@ -85,7 +73,7 @@ def fetch_tdlc():
                 })
         print(f"✅ {len(causas)} causas en el estado diario de hoy")
 
-        # ── Entrar a cada causa ───────────────────────────────────────────────
+        # Entrar a cada causa
         for i, causa in enumerate(causas):
             print(f"\n📂 [{i+1}/{len(causas)}] {causa['rol']}")
 
@@ -100,7 +88,7 @@ def fetch_tdlc():
             if i >= len(spans_causa):
                 continue
 
-            # Capturar nueva página al hacer clic
+            # Abrir página de la causa
             with context.expect_page() as nueva_page_info:
                 spans_causa[i].click()
             nueva_page = nueva_page_info.value
@@ -109,9 +97,9 @@ def fetch_tdlc():
 
             url_causa = nueva_page.url
             id_causa = url_causa.split("idCausa=")[-1].split("&")[0] if "idCausa=" in url_causa else None
-            print(f"  idCausa: {id_causa} | URL: {url_causa}")
+            print(f"  idCausa: {id_causa}")
 
-            # Capturar idCuaderno desde llamadas de red
+            # Capturar idCuaderno escuchando requests de red
             id_cuaderno = None
             requests_capturados = []
 
@@ -136,8 +124,7 @@ def fetch_tdlc():
                 continue
 
             # Obtener cookies para descargar PDFs
-            cookies_raw = context.cookies()
-            cookies_dict = {c["name"]: c["value"] for c in cookies_raw}
+            cookies_dict = {c["name"]: c["value"] for c in context.cookies()}
 
             # Consultar API de trámites
             resp_raw = nueva_page.evaluate(f"""() => {{
@@ -196,7 +183,7 @@ def fetch_tdlc():
 
     return resultados
 
-# ── Formatear mensaje ─────────────────────────────────────────────────────────
+# ── Formatear mensaje (sin contenido del PDF) ─────────────────────────────────
 def formatear_mensaje(resultados):
     hoy = hoy_chile.strftime("%d/%m/%Y")
     if not resultados:
@@ -206,17 +193,12 @@ def formatear_mensaje(resultados):
     msg += f"{'='*50}\n\n"
     msg += f"Se encontraron {len(resultados)} resolución(es):\n\n"
 
-    for i, r in enumerate(resultados, 1):
+    for r in resultados:
         msg += f"{'─'*50}\n"
         msg += f"📁 {r['rol']}\n"
         msg += f"📌 {r['caratula']}\n"
         msg += f"⚖️  {r['referencia']}\n"
         msg += f"🕐 {r['fecha']}\n\n"
-        # Primeros 800 chars del texto del PDF para el mensaje
-        extracto = r["contenido"][:800]
-        if len(r["contenido"]) > 800:
-            extracto += "...\n[Texto completo en el archivo adjunto]"
-        msg += extracto + "\n\n"
 
     msg += f"🔗 {URL_BASE}/estadoDiario"
     return msg
@@ -261,7 +243,7 @@ def send_email(message, resultados):
     msg["Subject"] = f"TDLC Estado Diario {hoy} — {len(resultados)} resolución(es)"
     msg.attach(MIMEText(message, "plain", "utf-8"))
 
-    # Adjuntar TXT con texto completo de todas las resoluciones
+    # Adjuntar TXT con texto completo
     if resultados:
         txt_completo = f"ESTADO DIARIO TDLC — {hoy}\n{'='*70}\n\n"
         for i, r in enumerate(resultados, 1):
@@ -277,7 +259,8 @@ def send_email(message, resultados):
         adjunto = MIMEBase("application", "octet-stream")
         adjunto.set_payload(txt_completo.encode("utf-8"))
         encoders.encode_base64(adjunto)
-        adjunto.add_header("Content-Disposition", f"attachment; filename=resoluciones_tdlc_{hoy_chile.strftime('%Y-%m-%d')}.txt")
+        adjunto.add_header("Content-Disposition",
+            f"attachment; filename=resoluciones_tdlc_{hoy_chile.strftime('%Y-%m-%d')}.txt")
         msg.attach(adjunto)
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
@@ -287,8 +270,10 @@ def send_email(message, resultados):
 
 # ── Hash para detectar cambios ────────────────────────────────────────────────
 def get_hash(resultados):
-    contenido = json.dumps([{k: v for k, v in r.items() if k != "contenido"}
-                             for r in resultados], ensure_ascii=False, sort_keys=True)
+    contenido = json.dumps(
+        [{k: v for k, v in r.items() if k != "contenido"} for r in resultados],
+        ensure_ascii=False, sort_keys=True
+    )
     return hashlib.md5(contenido.encode()).hexdigest()
 
 def load_last_hash():
