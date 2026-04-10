@@ -1,17 +1,18 @@
-name: TDLC Monitor WhatsApp
+name: TDLC Monitor
 
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '*/15 * * * *'  # cada 15 minutos (tu configuración original)
   workflow_dispatch:
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GH_PAT }}
+          token: ${{ secrets.GH_PAT }}  # necesario para hacer git push del hash
 
       - uses: actions/setup-python@v4
         with:
@@ -19,22 +20,22 @@ jobs:
 
       - name: Instalar dependencias
         run: |
-          pip install requests playwright
+          pip install requests playwright pdfplumber  # agregado pdfplumber para leer PDFs
           playwright install chromium
           playwright install-deps chromium
 
       - name: Ejecutar monitor
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY:   ${{ secrets.GEMINI_API_KEY }}   # tuyo, no estaba en mi versión
           TELEGRAM_TOKEN:   ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          EMAIL_FROM:      ${{ secrets.EMAIL_FROM }}
-          EMAIL_TO:        ${{ secrets.EMAIL_TO }}
-          GMAIL_PASSWORD:  ${{ secrets.GMAIL_PASSWORD }}
-        run: python monitor.py
+          EMAIL_FROM:       ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO:         ${{ secrets.EMAIL_TO }}
+          GMAIL_PASSWORD:   ${{ secrets.GMAIL_PASSWORD }}
+        run: python monitor.py  # tu nombre de archivo original
 
       - name: Subir HTML de debug
-        if: always()
+        if: always()  # se sube aunque el script falle, útil para depurar
         uses: actions/upload-artifact@v4
         with:
           name: debug-html
