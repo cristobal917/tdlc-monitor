@@ -5,6 +5,7 @@ import json
 import requests
 import datetime as dt
 import pdfplumber
+import subprocess
 from playwright.sync_api import sync_playwright
 
 HASH_FILE      = "last_hash.txt"
@@ -26,6 +27,19 @@ def load_page_hash():
 def save_page_hash(h):
     with open(PAGE_HASH_FILE, "w") as f:
         f.write(h)
+
+def push_page_hash():
+    try:
+        subprocess.run(["git", "config", "user.name", "tdlc-bot"], check=True)
+        subprocess.run(["git", "config", "user.email", "bot@tdlc"], check=True)
+        subprocess.run(["git", "add", PAGE_HASH_FILE], check=True)
+        result = subprocess.run(["git", "diff", "--cached", "--quiet"])
+        if result.returncode != 0:
+            subprocess.run(["git", "commit", "-m", "update page hash"], check=True)
+            subprocess.run(["git", "push", "origin", "main"], check=True)
+            print("✅ Hash de página guardado en repo")
+    except Exception as e:
+        print(f"⚠️ No se pudo guardar hash de página: {e}")
 
 # ── Descarga PDF con cookies de Playwright ────────────────────────────────────
 def descargar_pdf(cookies_dict, url_pdf):
@@ -95,6 +109,9 @@ def fetch_tdlc():
             browser.close()
             return [], causas_hash
 
+        # Guardar y pushear hash inmediatamente antes del scraping completo
+        save_page_hash(causas_hash)
+        push_page_hash()
         print("🔄 Lista de causas cambió, entrando a cada causa...")
 
         # ── Paso 3: scraping completo ─────────────────────────────────────
@@ -124,7 +141,7 @@ def fetch_tdlc():
             print(f"  idCausa: {id_causa}")
 
             # Capturar idCuaderno escuchando requests de red
-            id_cuaderno        = None
+            id_cuaderno         = None
             requests_capturados = []
 
             def capturar_request(request):
@@ -160,7 +177,7 @@ def fetch_tdlc():
             }}""")
 
             try:
-                data    = json.loads(resp_raw)
+                data     = json.loads(resp_raw)
                 tramites = data.get("results", data) if isinstance(data, dict) else data
             except:
                 print("  ❌ Error JSON")
@@ -328,7 +345,3 @@ if __name__ == "__main__":
             send_email(mensaje, resultados)
             save_hash(current_hash)
             print("✅ Listo.")
-
-    # Guardar hash de causas siempre, haya o no resultados
-    if causas_hash:
-        save_page_hash(causas_hash)
