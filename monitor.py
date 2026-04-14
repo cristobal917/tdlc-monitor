@@ -7,13 +7,25 @@ import datetime as dt
 import pdfplumber
 from playwright.sync_api import sync_playwright
 
-HASH_FILE = "last_hash.txt"
-URL_BASE = "https://consultas.tdlc.cl"
+HASH_FILE      = "last_hash.txt"
+PAGE_HASH_FILE = "last_page_hash.txt"
+URL_BASE       = "https://consultas.tdlc.cl"
 
 # ── Fecha de hoy en Chile (UTC-4) ─────────────────────────────────────────────
 hoy_chile = dt.datetime.now() - dt.timedelta(hours=4)
 HOY_MS = int(dt.datetime(hoy_chile.year, hoy_chile.month, hoy_chile.day,
              tzinfo=dt.timezone.utc).timestamp() * 1000)
+
+# ── Hash de página ────────────────────────────────────────────────────────────
+def load_page_hash():
+    if os.path.exists(PAGE_HASH_FILE):
+        with open(PAGE_HASH_FILE) as f:
+            return f.read().strip()
+    return ""
+
+def save_page_hash(h):
+    with open(PAGE_HASH_FILE, "w") as f:
+        f.write(h)
 
 # ── Descarga PDF con cookies de Playwright ────────────────────────────────────
 def descargar_pdf(cookies_dict, url_pdf):
@@ -40,17 +52,18 @@ def descargar_pdf(cookies_dict, url_pdf):
 
 # ── Scraping principal ────────────────────────────────────────────────────────
 def fetch_tdlc():
-    resultados = []
+    resultados  = []
+    causas_hash = None
 
     with sync_playwright() as p:
         browser = p.chromium.launch()
         context = browser.new_context()
+        page    = context.new_page()
 
-        page = context.new_page()
+        # ── Paso 1: abrir modal y leer lista de causas ────────────────────
         page.goto(f"{URL_BASE}/estadoDiario", wait_until="networkidle", timeout=60000)
         page.wait_for_timeout(5000)
 
-        # Abrir modal del día
         try:
             detalle_icon = page.wait_for_selector(".glyphicon-new-window", timeout=15000)
             detalle_icon.click()
@@ -59,10 +72,9 @@ def fetch_tdlc():
         except Exception as e:
             print(f"Error abriendo modal: {e}")
             browser.close()
-            return []
+            return [], None
 
-        # Leer causas del modal
-        filas = page.query_selector_all("#showDetalle tbody tr")
+        filas  = page.query_selector_all("#showDetalle tbody tr")
         causas = []
         for fila in filas:
             celdas = fila.query_selector_all("td")
@@ -73,7 +85,19 @@ def fetch_tdlc():
                 })
         print(f"✅ {len(causas)} causas en el estado diario de hoy")
 
-        # Entrar a cada causa
+        # ── Paso 2: calcular hash de la lista y comparar ──────────────────
+        causas_hash = hashlib.md5(
+            json.dumps(causas, ensure_ascii=False, sort_keys=True).encode()
+        ).hexdigest()
+
+        if causas_hash == load_page_hash():
+            print("📄 Lista de causas sin cambios. Nada que hacer.")
+            browser.close()
+            return [], causas_hash
+
+        print("🔄 Lista de causas cambió, entrando a cada causa...")
+
+        # ── Paso 3: scraping completo ─────────────────────────────────────
         for i, causa in enumerate(causas):
             print(f"\n📂 [{i+1}/{len(causas)}] {causa['rol']}")
 
@@ -96,11 +120,11 @@ def fetch_tdlc():
             nueva_page.wait_for_timeout(8000)
 
             url_causa = nueva_page.url
-            id_causa = url_causa.split("idCausa=")[-1].split("&")[0] if "idCausa=" in url_causa else None
+            id_causa  = url_causa.split("idCausa=")[-1].split("&")[0] if "idCausa=" in url_causa else None
             print(f"  idCausa: {id_causa}")
 
             # Capturar idCuaderno escuchando requests de red
-            id_cuaderno = None
+            id_cuaderno        = None
             requests_capturados = []
 
             def capturar_request(request):
@@ -114,7 +138,7 @@ def fetch_tdlc():
             for url_req in requests_capturados:
                 partes = url_req.split("/")
                 if "bloqueadossummary" in partes:
-                    idx = partes.index("bloqueadossummary")
+                    idx         = partes.index("bloqueadossummary")
                     id_cuaderno = partes[idx + 1]
                     break
 
@@ -136,7 +160,7 @@ def fetch_tdlc():
             }}""")
 
             try:
-                data = json.loads(resp_raw)
+                data    = json.loads(resp_raw)
                 tramites = data.get("results", data) if isinstance(data, dict) else data
             except:
                 print("  ❌ Error JSON")
@@ -163,7 +187,7 @@ def fetch_tdlc():
                     continue
 
                 url_pdf = f"{URL_BASE}/download/{id_enc}?inlineifpossible=true"
-                texto = descargar_pdf(cookies_dict, url_pdf)
+                texto   = descargar_pdf(cookies_dict, url_pdf)
 
                 if texto:
                     print(f"  ✅ PDF extraído ({len(texto)} chars)")
@@ -181,15 +205,15 @@ def fetch_tdlc():
 
         browser.close()
 
-    return resultados
+    return resultados, causas_hash
 
-# ── Formatear mensaje (sin contenido del PDF) ─────────────────────────────────
+# ── Formatear mensaje ─────────────────────────────────────────────────────────
 def formatear_mensaje(resultados):
     hoy = hoy_chile.strftime("%d/%m/%Y")
     if not resultados:
         return f"📋 TDLC Estado Diario {hoy}\n\nNo se encontraron resoluciones nuevas hoy."
 
-    msg = f"📋 TDLC — Estado Diario {hoy}\n"
+    msg  = f"📋 TDLC — Estado Diario {hoy}\n"
     msg += f"{'='*50}\n\n"
     msg += f"Se encontraron {len(resultados)} resolución(es):\n\n"
 
@@ -206,7 +230,7 @@ def formatear_mensaje(resultados):
 # ── Telegram ──────────────────────────────────────────────────────────────────
 def send_telegram(message):
     max_chars = 4000
-    partes = []
+    partes    = []
     while len(message) > max_chars:
         corte = message[:max_chars].rfind("\n")
         if corte == -1:
@@ -221,12 +245,12 @@ def send_telegram(message):
         url = f"https://api.telegram.org/bot{os.environ['TELEGRAM_TOKEN']}/sendMessage"
         requests.post(url, json={
             "chat_id": os.environ["TELEGRAM_CHAT_ID"],
-            "text": encabezado + parte
+            "text":    encabezado + parte
         })
         print(f"Telegram parte {i+1}/{total} enviada")
         time.sleep(1)
 
-# ── Email con PDF adjunto ─────────────────────────────────────────────────────
+# ── Email con TXT adjunto ─────────────────────────────────────────────────────
 def send_email(message, resultados):
     import smtplib
     from email.mime.text import MIMEText
@@ -235,15 +259,14 @@ def send_email(message, resultados):
     from email import encoders
 
     destinatarios = os.environ["EMAIL_TO"].split(",")
-    hoy = hoy_chile.strftime("%d/%m/%Y")
+    hoy           = hoy_chile.strftime("%d/%m/%Y")
 
-    msg = MIMEMultipart()
+    msg            = MIMEMultipart()
     msg["From"]    = os.environ["EMAIL_FROM"]
     msg["To"]      = ", ".join(destinatarios)
     msg["Subject"] = f"TDLC Estado Diario {hoy} — {len(resultados)} resolución(es)"
     msg.attach(MIMEText(message, "plain", "utf-8"))
 
-    # Adjuntar TXT con texto completo
     if resultados:
         txt_completo = f"ESTADO DIARIO TDLC — {hoy}\n{'='*70}\n\n"
         for i, r in enumerate(resultados, 1):
@@ -268,7 +291,7 @@ def send_email(message, resultados):
         server.sendmail(os.environ["EMAIL_FROM"], destinatarios, msg.as_string())
     print(f"Email enviado a {len(destinatarios)} destinatario(s)")
 
-# ── Hash para detectar cambios ────────────────────────────────────────────────
+# ── Hash de resultados ────────────────────────────────────────────────────────
 def get_hash(resultados):
     contenido = json.dumps(
         [{k: v for k, v in r.items() if k != "contenido"} for r in resultados],
@@ -278,7 +301,7 @@ def get_hash(resultados):
 
 def load_last_hash():
     if os.path.exists(HASH_FILE):
-        with open(HASH_FILE, "r") as f:
+        with open(HASH_FILE) as f:
             return f.read().strip()
     return ""
 
@@ -290,13 +313,12 @@ def save_hash(h):
 if __name__ == "__main__":
     print(f"Verificando TDLC — {hoy_chile.strftime('%d/%m/%Y %H:%M')}...")
 
-    resultados = fetch_tdlc()
+    resultados, causas_hash = fetch_tdlc()
 
     if not resultados:
         print("Sin resoluciones nuevas hoy.")
     else:
         current_hash = get_hash(resultados)
-
         if current_hash == load_last_hash():
             print("Sin cambios desde la última ejecución.")
         else:
@@ -306,3 +328,7 @@ if __name__ == "__main__":
             send_email(mensaje, resultados)
             save_hash(current_hash)
             print("✅ Listo.")
+
+    # Guardar hash de causas siempre, haya o no resultados
+    if causas_hash:
+        save_page_hash(causas_hash)
