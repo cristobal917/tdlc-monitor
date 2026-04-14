@@ -5,69 +5,15 @@ import json
 import requests
 import datetime as dt
 import pdfplumber
-import fcntl
-import sys
 from playwright.sync_api import sync_playwright
 
-HASH_FILE      = "last_hash.txt"
-PAGE_HASH_FILE = "last_page_hash.txt"
-LOCK_FILE      = "tdlc_monitor.lock"
-URL_BASE       = "https://consultas.tdlc.cl"
+HASH_FILE = "last_hash.txt"
+URL_BASE = "https://consultas.tdlc.cl"
 
 # ── Fecha de hoy en Chile (UTC-4) ─────────────────────────────────────────────
 hoy_chile = dt.datetime.now() - dt.timedelta(hours=4)
 HOY_MS = int(dt.datetime(hoy_chile.year, hoy_chile.month, hoy_chile.day,
              tzinfo=dt.timezone.utc).timestamp() * 1000)
-
-# ── Lock de proceso ───────────────────────────────────────────────────────────
-class ProcessLock:
-    def __init__(self, path):
-        self.path = path
-        self.fp   = None
-
-    def acquire(self):
-        self.fp = open(self.path, "w")
-        try:
-            fcntl.flock(self.fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            self.fp.write(str(os.getpid()))
-            self.fp.flush()
-            return True
-        except OSError:
-            self.fp.close()
-            return False
-
-    def release(self):
-        if self.fp:
-            fcntl.flock(self.fp, fcntl.LOCK_UN)
-            self.fp.close()
-            try:
-                os.remove(self.path)
-            except FileNotFoundError:
-                pass
-
-# ── Hash rápido de la página ──────────────────────────────────────────────────
-def get_page_hash_quick():
-    try:
-        resp = requests.get(
-            f"{URL_BASE}/estadoDiario",
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=15
-        )
-        if resp.status_code == 200:
-            return hashlib.md5(resp.content).hexdigest()
-    except Exception as e:
-        print(f"  ⚠️  No se pudo obtener hash rápido: {e}")
-    return None
-
-def load_page_hash():
-    if os.path.exists(PAGE_HASH_FILE):
-        with open(PAGE_HASH_FILE) as f:
-            return f.read().strip()
-    return ""
-
-def save_page_hash(h):
-    with open(PAGE_HASH_FILE, "w") as f:
-        f.write(h)
 
 # ── Descarga PDF con cookies de Playwright ────────────────────────────────────
 def descargar_pdf(cookies_dict, url_pdf):
@@ -104,6 +50,7 @@ def fetch_tdlc():
         page.goto(f"{URL_BASE}/estadoDiario", wait_until="networkidle", timeout=60000)
         page.wait_for_timeout(5000)
 
+        # Abrir modal del día
         try:
             detalle_icon = page.wait_for_selector(".glyphicon-new-window", timeout=15000)
             detalle_icon.click()
@@ -114,6 +61,7 @@ def fetch_tdlc():
             browser.close()
             return []
 
+        # Leer causas del modal
         filas = page.query_selector_all("#showDetalle tbody tr")
         causas = []
         for fila in filas:
@@ -125,9 +73,11 @@ def fetch_tdlc():
                 })
         print(f"✅ {len(causas)} causas en el estado diario de hoy")
 
+        # Entrar a cada causa
         for i, causa in enumerate(causas):
             print(f"\n📂 [{i+1}/{len(causas)}] {causa['rol']}")
 
+            # Reabrir modal para obtener idCausa
             page.goto(f"{URL_BASE}/estadoDiario", wait_until="networkidle", timeout=60000)
             page.wait_for_timeout(5000)
             iconos = page.query_selector_all(".glyphicon-new-window")
@@ -138,6 +88,7 @@ def fetch_tdlc():
             if i >= len(spans_causa):
                 continue
 
+            # Abrir página de la causa
             with context.expect_page() as nueva_page_info:
                 spans_causa[i].click()
             nueva_page = nueva_page_info.value
@@ -148,6 +99,7 @@ def fetch_tdlc():
             id_causa = url_causa.split("idCausa=")[-1].split("&")[0] if "idCausa=" in url_causa else None
             print(f"  idCausa: {id_causa}")
 
+            # Capturar idCuaderno escuchando requests de red
             id_cuaderno = None
             requests_capturados = []
 
@@ -171,8 +123,10 @@ def fetch_tdlc():
                 nueva_page.close()
                 continue
 
+            # Obtener cookies para descargar PDFs
             cookies_dict = {c["name"]: c["value"] for c in context.cookies()}
 
+            # Consultar API de trámites
             resp_raw = nueva_page.evaluate(f"""() => {{
                 var xhr = new XMLHttpRequest();
                 xhr.open('GET', '{URL_BASE}/rest/tramite/bloqueadossummary/{id_cuaderno}/10000/1/true/false', false);
@@ -189,6 +143,7 @@ def fetch_tdlc():
                 nueva_page.close()
                 continue
 
+            # Filtrar resoluciones de hoy
             resoluciones_hoy = [
                 t for t in tramites
                 if isinstance(t, dict)
@@ -197,6 +152,7 @@ def fetch_tdlc():
             ]
             print(f"  Resoluciones de hoy: {len(resoluciones_hoy)}")
 
+            # Descargar PDF de cada resolución
             for tramite in resoluciones_hoy:
                 id_enc     = tramite.get("idDocumentoEncriptado")
                 referencia = tramite.get("referencia", "sin referencia")
@@ -227,7 +183,7 @@ def fetch_tdlc():
 
     return resultados
 
-# ── Formatear mensaje ─────────────────────────────────────────────────────────
+# ── Formatear mensaje (sin contenido del PDF) ─────────────────────────────────
 def formatear_mensaje(resultados):
     hoy = hoy_chile.strftime("%d/%m/%Y")
     if not resultados:
@@ -270,7 +226,7 @@ def send_telegram(message):
         print(f"Telegram parte {i+1}/{total} enviada")
         time.sleep(1)
 
-# ── Email ─────────────────────────────────────────────────────────────────────
+# ── Email con PDF adjunto ─────────────────────────────────────────────────────
 def send_email(message, resultados):
     import smtplib
     from email.mime.text import MIMEText
@@ -287,6 +243,7 @@ def send_email(message, resultados):
     msg["Subject"] = f"TDLC Estado Diario {hoy} — {len(resultados)} resolución(es)"
     msg.attach(MIMEText(message, "plain", "utf-8"))
 
+    # Adjuntar TXT con texto completo
     if resultados:
         txt_completo = f"ESTADO DIARIO TDLC — {hoy}\n{'='*70}\n\n"
         for i, r in enumerate(resultados, 1):
@@ -311,7 +268,7 @@ def send_email(message, resultados):
         server.sendmail(os.environ["EMAIL_FROM"], destinatarios, msg.as_string())
     print(f"Email enviado a {len(destinatarios)} destinatario(s)")
 
-# ── Hash de resultados ────────────────────────────────────────────────────────
+# ── Hash para detectar cambios ────────────────────────────────────────────────
 def get_hash(resultados):
     contenido = json.dumps(
         [{k: v for k, v in r.items() if k != "contenido"} for r in resultados],
@@ -321,7 +278,7 @@ def get_hash(resultados):
 
 def load_last_hash():
     if os.path.exists(HASH_FILE):
-        with open(HASH_FILE) as f:
+        with open(HASH_FILE, "r") as f:
             return f.read().strip()
     return ""
 
@@ -331,40 +288,21 @@ def save_hash(h):
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    # 1️⃣ Check rápido del hash de página (sin Playwright)
-    page_hash = get_page_hash_quick()
-    if page_hash and page_hash == load_page_hash():
-        print("📄 Página sin cambios (hash rápido). Nada que hacer.")
-        sys.exit(0)
+    print(f"Verificando TDLC — {hoy_chile.strftime('%d/%m/%Y %H:%M')}...")
 
-    # 2️⃣ Adquirir lock — salir si ya hay un proceso corriendo
-    lock = ProcessLock(LOCK_FILE)
-    if not lock.acquire():
-        print("⏳ Ya hay un proceso en ejecución. Saliendo.")
-        sys.exit(0)
+    resultados = fetch_tdlc()
 
-    try:
-        print(f"Verificando TDLC — {hoy_chile.strftime('%d/%m/%Y %H:%M')}...")
+    if not resultados:
+        print("Sin resoluciones nuevas hoy.")
+    else:
+        current_hash = get_hash(resultados)
 
-        resultados = fetch_tdlc()
-
-        # Guardar hash de página al terminar el scraping
-        if page_hash:
-            save_page_hash(page_hash)
-
-        if not resultados:
-            print("Sin resoluciones nuevas hoy.")
+        if current_hash == load_last_hash():
+            print("Sin cambios desde la última ejecución.")
         else:
-            current_hash = get_hash(resultados)
-            if current_hash == load_last_hash():
-                print("Sin cambios desde la última ejecución.")
-            else:
-                print(f"¡{len(resultados)} resolución(es) nueva(s)! Enviando notificaciones...")
-                mensaje = formatear_mensaje(resultados)
-                send_telegram(mensaje)
-                send_email(mensaje, resultados)
-                save_hash(current_hash)
-                print("✅ Listo.")
-
-    finally:
-        lock.release()
+            print(f"¡{len(resultados)} resolución(es) nueva(s)! Enviando notificaciones...")
+            mensaje = formatear_mensaje(resultados)
+            send_telegram(mensaje)
+            send_email(mensaje, resultados)
+            save_hash(current_hash)
+            print("✅ Listo.")
