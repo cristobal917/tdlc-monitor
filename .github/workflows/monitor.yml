@@ -1,50 +1,47 @@
 name: TDLC Monitor
-
 on:
   schedule:
-    - cron: '*/15 * * * *'  # cada 15 minutos (tu configuración original)
+    - cron: '*/15 * * * *'
   workflow_dispatch:
+
+concurrency:
+  group: tdlc-monitor
+  cancel-in-progress: false
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GH_PAT }}  # necesario para hacer git push del hash
-
+          token: ${{ secrets.GH_PAT }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Instalar dependencias
         run: |
-          pip install requests playwright pdfplumber  # agregado pdfplumber para leer PDFs
+          pip install requests playwright pdfplumber
           playwright install chromium
           playwright install-deps chromium
-
       - name: Ejecutar monitor
         env:
-          GEMINI_API_KEY:   ${{ secrets.GEMINI_API_KEY }}   # tuyo, no estaba en mi versión
+          GEMINI_API_KEY:   ${{ secrets.GEMINI_API_KEY }}
           TELEGRAM_TOKEN:   ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           EMAIL_FROM:       ${{ secrets.EMAIL_FROM }}
           EMAIL_TO:         ${{ secrets.EMAIL_TO }}
           GMAIL_PASSWORD:   ${{ secrets.GMAIL_PASSWORD }}
-        run: python monitor.py  # tu nombre de archivo original
-
+        run: python monitor.py
       - name: Subir HTML de debug
-        if: always()  # se sube aunque el script falle, útil para depurar
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: debug-html
           path: debug.html
-
       - name: Guardar hash
         run: |
           git config user.name "tdlc-bot"
           git config user.email "bot@tdlc"
-          git add last_hash.txt
+          git add last_hash.txt last_page_hash.txt
           git diff --cached --quiet || git commit -m "update hash"
           git push origin main || true
