@@ -1,11 +1,9 @@
 name: TDLC Monitor
+
 on:
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 concurrency:
   group: tdlc-monitor
@@ -15,10 +13,10 @@ jobs:
   monitor:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5        # ✅ Node.js 24 nativo
         with:
           token: ${{ secrets.GH_PAT }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6    # ✅ Node.js 24 nativo
         with:
           python-version: '3.11'
       - name: Instalar dependencias
@@ -37,7 +35,7 @@ jobs:
         run: python monitor.py
       - name: Subir HTML de debug
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6  # ✅ Node.js 24 nativo
         with:
           name: debug-html
           path: debug.html
