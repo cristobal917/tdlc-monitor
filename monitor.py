@@ -1,4 +1,5 @@
 import os
+import re
 import hashlib
 import time
 import json
@@ -63,6 +64,34 @@ def descargar_pdf(cookies_dict, url_pdf):
     except Exception as e:
         print(f"  Error descargando PDF: {e}")
         return None
+
+# ── Limpieza de texto extraído del PDF ───────────────────────────────────────
+def limpiar_contenido(texto):
+    """Elimina encabezados de página y bloque de firma electrónica del PDF."""
+
+    # Eliminar número de página + encabezado institucional
+    # Captura variantes: REPÚBLICA, REPUBLICA, REP ÚBLICA (artefacto OCR)
+    texto = re.sub(
+        r'\n\d+\s*\n[^\n]*(?:REP[ÚU\s]{0,2}BLICA|REPÚBLICA|REPUBLICA)\s+DE\s+CHILE[^\n]*\n'
+        r'TRIBUNAL DE DEFENSA DE LA LIBRE COMPETENCIA\n',
+        '\n',
+        texto
+    )
+
+    # Eliminar bloque de firma electrónica
+    # "Autorizada por..." puede venir en la misma línea que "Pronunciada por..."
+    texto = re.sub(
+        r'\s*Autorizada por la Secretaria Abogada\(S\),.*?'
+        r'verificación indicado bajo el código de barras\.',
+        '',
+        texto,
+        flags=re.DOTALL
+    )
+
+    # Colapsar líneas en blanco excesivas
+    texto = re.sub(r'\n{3,}', '\n\n', texto)
+
+    return texto.strip()
 
 # ── Scraping principal ────────────────────────────────────────────────────────
 def fetch_tdlc():
@@ -224,7 +253,7 @@ def fetch_tdlc():
 
     return resultados, causas_hash
 
-# ── Formatear mensaje ─────────────────────────────────────────────────────────
+# ── Formatear mensaje (Telegram) ──────────────────────────────────────────────
 def formatear_mensaje(resultados):
     hoy = hoy_chile.strftime("%d/%m/%Y")
     if not resultados:
@@ -277,6 +306,9 @@ def send_email(message, resultados):
 
     destinatarios = os.environ["EMAIL_TO"].split(",")
     hoy           = hoy_chile.strftime("%d/%m/%Y")
+    ancho         = 70
+    linea_gruesa  = "═" * ancho
+    linea_delgada = "─" * ancho
 
     msg            = MIMEMultipart()
     msg["From"]    = os.environ["EMAIL_FROM"]
@@ -285,22 +317,46 @@ def send_email(message, resultados):
     msg.attach(MIMEText(message, "plain", "utf-8"))
 
     if resultados:
-        txt_completo = f"ESTADO DIARIO TDLC — {hoy}\n{'='*70}\n\n"
+
+        # ── Encabezado ────────────────────────────────────────────────────
+        txt  = f"{linea_gruesa}\n"
+        txt += f"  ESTADO DIARIO TDLC — {hoy}\n"
+        txt += f"  {len(resultados)} resolución(es)\n"
+        txt += f"{linea_gruesa}\n\n"
+
+        # ── Índice rápido ─────────────────────────────────────────────────
+        txt += "ÍNDICE\n"
+        txt += f"{linea_delgada}\n"
         for i, r in enumerate(resultados, 1):
-            txt_completo += f"RESOLUCIÓN {i}\n"
-            txt_completo += f"Causa:      {r['rol']}\n"
-            txt_completo += f"Carátula:   {r['caratula']}\n"
-            txt_completo += f"Resolución: {r['referencia']}\n"
-            txt_completo += f"Fecha:      {r['fecha']}\n"
-            txt_completo += f"{'─'*70}\n"
-            txt_completo += r["contenido"]
-            txt_completo += f"\n\n{'='*70}\n\n"
+            txt += f"  {i:>2}. [{r['rol']}]  {r['referencia']}\n"
+            txt += f"      {r['caratula']}\n"
+        txt += f"\n{linea_gruesa}\n\n"
+
+        # ── Resoluciones ──────────────────────────────────────────────────
+        for i, r in enumerate(resultados, 1):
+            contenido_limpio = limpiar_contenido(r["contenido"])
+
+            txt += f"RESOLUCIÓN {i} DE {len(resultados)}\n"
+            txt += f"{linea_delgada}\n"
+            txt += f"  Causa:      {r['rol']}\n"
+            txt += f"  Carátula:   {r['caratula']}\n"
+            txt += f"  Resolución: {r['referencia']}\n"
+            txt += f"  Fecha:      {r['fecha']}\n"
+            txt += f"{linea_delgada}\n\n"
+
+            # Indentar el cuerpo de la resolución
+            for linea in contenido_limpio.splitlines():
+                txt += f"  {linea}\n" if linea.strip() else "\n"
+
+            txt += f"\n{linea_gruesa}\n\n"
 
         adjunto = MIMEBase("application", "octet-stream")
-        adjunto.set_payload(txt_completo.encode("utf-8"))
+        adjunto.set_payload(txt.encode("utf-8"))
         encoders.encode_base64(adjunto)
-        adjunto.add_header("Content-Disposition",
-            f"attachment; filename=resoluciones_tdlc_{hoy_chile.strftime('%Y-%m-%d')}.txt")
+        adjunto.add_header(
+            "Content-Disposition",
+            f"attachment; filename=resoluciones_tdlc_{hoy_chile.strftime('%Y-%m-%d')}.txt"
+        )
         msg.attach(adjunto)
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
