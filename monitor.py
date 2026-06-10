@@ -70,7 +70,6 @@ def limpiar_contenido(texto):
     """Elimina encabezados de página y bloque de firma electrónica del PDF."""
 
     # Eliminar número de página + encabezado institucional
-    # Captura variantes: REPÚBLICA, REPUBLICA, REP ÚBLICA (artefacto OCR)
     texto = re.sub(
         r'\n\d+\s*\n[^\n]*(?:REP[ÚU\s]{0,2}BLICA|REPÚBLICA|REPUBLICA)\s+DE\s+CHILE[^\n]*\n'
         r'TRIBUNAL DE DEFENSA DE LA LIBRE COMPETENCIA\n',
@@ -79,7 +78,6 @@ def limpiar_contenido(texto):
     )
 
     # Eliminar bloque de firma electrónica
-    # "Autorizada por..." puede venir en la misma línea que "Pronunciada por..."
     texto = re.sub(
         r'\s*Autorizada por la Secretaria Abogada\(S\),.*?'
         r'verificación indicado bajo el código de barras\.',
@@ -92,6 +90,19 @@ def limpiar_contenido(texto):
     texto = re.sub(r'\n{3,}', '\n\n', texto)
 
     return texto.strip()
+
+# ── Extraer idCuaderno desde URLs capturadas ──────────────────────────────────
+def extraer_ids_cuadernos(lista_urls):
+    ids = []
+    for u in lista_urls:
+        partes = u.split("/")
+        if "bloqueadossummary" in partes:
+            idx = partes.index("bloqueadossummary")
+            if idx + 1 < len(partes):
+                id_c = partes[idx + 1].split("?")[0]  # quitar query string si lo hay
+                if id_c and id_c not in ids:
+                    ids.append(id_c)
+    return ids
 
 # ── Scraping principal ────────────────────────────────────────────────────────
 def fetch_tdlc():
@@ -169,8 +180,7 @@ def fetch_tdlc():
             id_causa  = url_causa.split("idCausa=")[-1].split("&")[0] if "idCausa=" in url_causa else None
             print(f"  idCausa: {id_causa}")
 
-            # Capturar idCuaderno escuchando requests de red
-            id_cuaderno         = None
+            # ── Recargar y capturar cuadernos ─────────────────────────────
             requests_capturados = []
 
             def capturar_request(request):
@@ -181,71 +191,112 @@ def fetch_tdlc():
             nueva_page.reload(wait_until="networkidle", timeout=30000)
             nueva_page.wait_for_timeout(10000)
 
-            for url_req in requests_capturados:
-                partes = url_req.split("/")
-                if "bloqueadossummary" in partes:
-                    idx         = partes.index("bloqueadossummary")
-                    id_cuaderno = partes[idx + 1]
-                    break
+            # IDs capturados en la carga inicial (cuaderno activo por defecto)
+            ids_cuadernos_vistos = set(extraer_ids_cuadernos(requests_capturados))
 
-            print(f"  idCuaderno: {id_cuaderno}")
-            if not id_cuaderno:
+            # ── Buscar pestañas de cuadernos adicionales y hacer click ────
+            # El TDLC usa AngularJS; los selectores cubren los patrones más comunes.
+            # Si ninguno matchea, agregar print(nueva_page.content()) para inspeccionar.
+            pestanas = nueva_page.query_selector_all(
+                "ul.nav-tabs li a, "
+                "[ng-click*='Cuaderno'], "
+                "[ng-click*='cuaderno'], "
+                "li.cuaderno a, "
+                ".cuadernos-tab, "
+                "[data-cuaderno]"
+            )
+            print(f"  Pestañas de cuadernos encontradas: {len(pestanas)}")
+
+            for pestana in pestanas:
+                requests_capturados.clear()
+                try:
+                    nombre_tab = pestana.inner_text().strip()
+                    pestana.click()
+                    nueva_page.wait_for_timeout(4000)
+                    nuevos = extraer_ids_cuadernos(requests_capturados)
+                    for id_c in nuevos:
+                        if id_c not in ids_cuadernos_vistos:
+                            print(f"  + Cuaderno detectado vía pestaña '{nombre_tab}': {id_c}")
+                            ids_cuadernos_vistos.add(id_c)
+                except Exception as e:
+                    print(f"  ⚠️ Error al hacer click en pestaña: {e}")
+                    continue
+
+            ids_cuadernos = list(ids_cuadernos_vistos)
+            print(f"  idCuadernos totales: {ids_cuadernos}")
+
+            if not ids_cuadernos:
+                print("  ⚠️ No se detectó ningún cuaderno, saltando causa.")
                 nueva_page.close()
                 continue
 
             # Obtener cookies para descargar PDFs
             cookies_dict = {c["name"]: c["value"] for c in context.cookies()}
 
-            # Consultar API de trámites
-            resp_raw = nueva_page.evaluate(f"""() => {{
-                var xhr = new XMLHttpRequest();
-                xhr.open('GET', '{URL_BASE}/rest/tramite/bloqueadossummary/{id_cuaderno}/10000/1/true/false', false);
-                xhr.setRequestHeader('Accept', 'application/json');
-                xhr.send();
-                return xhr.responseText;
-            }}""")
+            # ── Consultar API de trámites para cada cuaderno ──────────────
+            for id_cuaderno in ids_cuadernos:
+                print(f"\n  📒 Consultando cuaderno: {id_cuaderno}")
 
-            try:
-                data     = json.loads(resp_raw)
-                tramites = data.get("results", data) if isinstance(data, dict) else data
-            except:
-                print("  ❌ Error JSON")
-                nueva_page.close()
-                continue
+                resp_raw = nueva_page.evaluate(f"""() => {{
+                    var xhr = new XMLHttpRequest();
+                    xhr.open('GET', '{URL_BASE}/rest/tramite/bloqueadossummary/{id_cuaderno}/10000/1/true/false', false);
+                    xhr.setRequestHeader('Accept', 'application/json');
+                    xhr.send();
+                    return xhr.responseText;
+                }}""")
 
-            # Filtrar resoluciones de hoy
-            resoluciones_hoy = [
-                t for t in tramites
-                if isinstance(t, dict)
-                and t.get("tipoTramite") == "Resolución"
-                and t.get("fecha", 0) >= HOY_MS
-            ]
-            print(f"  Resoluciones de hoy: {len(resoluciones_hoy)}")
-
-            # Descargar PDF de cada resolución
-            for tramite in resoluciones_hoy:
-                id_enc     = tramite.get("idDocumentoEncriptado")
-                referencia = tramite.get("referencia", "sin referencia")
-                fecha_dt   = dt.datetime.fromtimestamp(tramite.get("fecha", 0) / 1000)
-                print(f"  📄 {referencia} | {fecha_dt}")
-
-                if not id_enc:
+                try:
+                    data     = json.loads(resp_raw)
+                    tramites = data.get("results", data) if isinstance(data, dict) else data
+                except Exception:
+                    print(f"  ❌ Error JSON en cuaderno {id_cuaderno}")
                     continue
 
-                url_pdf = f"{URL_BASE}/download/{id_enc}?inlineifpossible=true"
-                texto   = descargar_pdf(cookies_dict, url_pdf)
+                # Intentar obtener el nombre del cuaderno desde la respuesta
+                nombre_cuaderno = None
+                if isinstance(data, dict):
+                    nombre_cuaderno = (
+                        data.get("nombreCuaderno")
+                        or data.get("nombre")
+                        or data.get("tipoCuaderno")
+                    )
+                if not nombre_cuaderno:
+                    nombre_cuaderno = f"Cuaderno {id_cuaderno}"
 
-                if texto:
-                    print(f"  ✅ PDF extraído ({len(texto)} chars)")
-                    resultados.append({
-                        "rol":        causa["rol"],
-                        "caratula":   causa["caratula"],
-                        "referencia": referencia,
-                        "fecha":      fecha_dt.strftime("%d/%m/%Y %H:%M"),
-                        "contenido":  texto
-                    })
-                else:
-                    print(f"  ⚠️ No se pudo descargar PDF")
+                # Filtrar resoluciones de hoy
+                resoluciones_hoy = [
+                    t for t in tramites
+                    if isinstance(t, dict)
+                    and t.get("tipoTramite") == "Resolución"
+                    and t.get("fecha", 0) >= HOY_MS
+                ]
+                print(f"  [{nombre_cuaderno}] Resoluciones de hoy: {len(resoluciones_hoy)}")
+
+                # Descargar PDF de cada resolución
+                for tramite in resoluciones_hoy:
+                    id_enc     = tramite.get("idDocumentoEncriptado")
+                    referencia = tramite.get("referencia", "sin referencia")
+                    fecha_dt   = dt.datetime.fromtimestamp(tramite.get("fecha", 0) / 1000)
+                    print(f"  📄 {referencia} | {fecha_dt} | {nombre_cuaderno}")
+
+                    if not id_enc:
+                        continue
+
+                    url_pdf = f"{URL_BASE}/download/{id_enc}?inlineifpossible=true"
+                    texto   = descargar_pdf(cookies_dict, url_pdf)
+
+                    if texto:
+                        print(f"  ✅ PDF extraído ({len(texto)} chars)")
+                        resultados.append({
+                            "rol":        causa["rol"],
+                            "caratula":   causa["caratula"],
+                            "cuaderno":   nombre_cuaderno,
+                            "referencia": referencia,
+                            "fecha":      fecha_dt.strftime("%d/%m/%Y %H:%M"),
+                            "contenido":  texto
+                        })
+                    else:
+                        print(f"  ⚠️ No se pudo descargar PDF")
 
             nueva_page.close()
 
@@ -267,6 +318,7 @@ def formatear_mensaje(resultados):
         msg += f"{'─'*50}\n"
         msg += f"📁 {r['rol']}\n"
         msg += f"📌 {r['caratula']}\n"
+        msg += f"📒 {r.get('cuaderno', 'Cuaderno Principal')}\n"
         msg += f"⚖️  {r['referencia']}\n"
         msg += f"🕐 {r['fecha']}\n\n"
 
@@ -328,18 +380,21 @@ def send_email(message, resultados):
         txt += "ÍNDICE\n"
         txt += f"{linea_delgada}\n"
         for i, r in enumerate(resultados, 1):
-            txt += f"  {i:>2}. [{r['rol']}]  {r['referencia']}\n"
+            cuaderno_label = r.get("cuaderno", "Principal")
+            txt += f"  {i:>2}. [{r['rol']}]  {r['referencia']}  — {cuaderno_label}\n"
             txt += f"      {r['caratula']}\n"
         txt += f"\n{linea_gruesa}\n\n"
 
         # ── Resoluciones ──────────────────────────────────────────────────
         for i, r in enumerate(resultados, 1):
             contenido_limpio = limpiar_contenido(r["contenido"])
+            cuaderno_label   = r.get("cuaderno", "Principal")
 
             txt += f"RESOLUCIÓN {i} DE {len(resultados)}\n"
             txt += f"{linea_delgada}\n"
             txt += f"  Causa:      {r['rol']}\n"
             txt += f"  Carátula:   {r['caratula']}\n"
+            txt += f"  Cuaderno:   {cuaderno_label}\n"
             txt += f"  Resolución: {r['referencia']}\n"
             txt += f"  Fecha:      {r['fecha']}\n"
             txt += f"{linea_delgada}\n\n"
