@@ -7,7 +7,7 @@ import requests
 import datetime as dt
 import pdfplumber
 import subprocess
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 HASH_FILE      = "last_hash.txt"
 PAGE_HASH_FILE = "last_page_hash.txt"
@@ -19,6 +19,39 @@ HOY_MS    = int(
     dt.datetime(hoy_chile.year, hoy_chile.month, hoy_chile.day,
                 tzinfo=dt.timezone.utc).timestamp() * 1000
 )
+
+
+# ── Helpers de navegación con reintentos ──────────────────────────────────────
+def goto_con_reintentos(page, url, intentos=3, espera_extra=5000, **kwargs):
+    """Navega con reintentos y wait_until más tolerante (domcontentloaded en vez de networkidle)."""
+    kwargs.setdefault("wait_until", "domcontentloaded")
+    kwargs.setdefault("timeout", 60000)
+    for intento in range(1, intentos + 1):
+        try:
+            page.goto(url, **kwargs)
+            page.wait_for_timeout(espera_extra)
+            return
+        except PlaywrightTimeoutError as e:
+            print(f"  ⚠️ Timeout navegando a {url} (intento {intento}/{intentos}): {e}")
+            if intento == intentos:
+                raise
+            page.wait_for_timeout(3000)
+
+
+def reload_con_reintentos(page, intentos=3, espera_extra=5000, **kwargs):
+    """Recarga con reintentos y wait_until más tolerante."""
+    kwargs.setdefault("wait_until", "domcontentloaded")
+    kwargs.setdefault("timeout", 30000)
+    for intento in range(1, intentos + 1):
+        try:
+            page.reload(**kwargs)
+            page.wait_for_timeout(espera_extra)
+            return
+        except PlaywrightTimeoutError as e:
+            print(f"  ⚠️ Timeout recargando (intento {intento}/{intentos}): {e}")
+            if intento == intentos:
+                raise
+            page.wait_for_timeout(3000)
 
 
 # ── Hash de página ────────────────────────────────────────────────────────────
@@ -227,8 +260,7 @@ def fetch_tdlc():
         page    = context.new_page()
 
         # ── Paso 1: abrir modal y leer lista de causas ────────────────────
-        page.goto(f"{URL_BASE}/estadoDiario", wait_until="networkidle", timeout=60000)
-        page.wait_for_timeout(5000)
+        goto_con_reintentos(page, f"{URL_BASE}/estadoDiario")
 
         try:
             detalle_icon = page.wait_for_selector(".glyphicon-new-window", timeout=15000)
@@ -270,8 +302,7 @@ def fetch_tdlc():
             print(f"\n📂 [{i+1}/{len(causas)}] {causa['rol']} — {causa['caratula']}")
 
             # Reabrir modal para obtener el span de esta causa
-            page.goto(f"{URL_BASE}/estadoDiario", wait_until="networkidle", timeout=60000)
-            page.wait_for_timeout(5000)
+            goto_con_reintentos(page, f"{URL_BASE}/estadoDiario")
             iconos = page.query_selector_all(".glyphicon-new-window")
             iconos[0].click()
             page.wait_for_timeout(4000)
@@ -286,7 +317,10 @@ def fetch_tdlc():
             with context.expect_page() as nueva_page_info:
                 spans_causa[i].click()
             nueva_page = nueva_page_info.value
-            nueva_page.wait_for_load_state("networkidle", timeout=30000)
+            try:
+                nueva_page.wait_for_load_state("domcontentloaded", timeout=30000)
+            except PlaywrightTimeoutError:
+                print("  ⚠️ Timeout esperando carga de nueva página, continuando de todos modos")
             nueva_page.wait_for_timeout(8000)
 
             url_causa = nueva_page.url
@@ -305,8 +339,7 @@ def fetch_tdlc():
                     requests_capturados.append(request.url)
 
             nueva_page.on("request", capturar_request)
-            nueva_page.reload(wait_until="networkidle", timeout=30000)
-            nueva_page.wait_for_timeout(10000)
+            reload_con_reintentos(nueva_page, espera_extra=10000)
 
             for url_req in requests_capturados:
                 partes = url_req.split("/")
@@ -346,12 +379,12 @@ def fetch_tdlc():
                 if not id_c:
                     # Fallback: recargar la página del expediente y reintentar
                     print(f"    ⚠️  Reintentando tras recarga...")
-                    nueva_page.goto(
+                    goto_con_reintentos(
+                        nueva_page,
                         f"{URL_BASE}/estadoDiario?idCausa={id_causa}",
-                        wait_until="networkidle",
+                        espera_extra=10000,
                         timeout=30000,
                     )
-                    nueva_page.wait_for_timeout(10000)
                     cookies_dict = {c["name"]: c["value"] for c in context.cookies()}
                     id_c = seleccionar_cuaderno_y_capturar_id(nueva_page, idx_c, nombre_c)
                     print(f"    idCuaderno reintento: {id_c}")
@@ -508,7 +541,11 @@ def save_hash(h):
 if __name__ == "__main__":
     print(f"Verificando TDLC — {hoy_chile.strftime('%d/%m/%Y %H:%M')}...")
 
-    resultados, causas_hash = fetch_tdlc()
+    try:
+        resultados, causas_hash = fetch_tdlc()
+    except Exception as e:
+        print(f"❌ Error fatal en fetch_tdlc: {e}")
+        raise
 
     if not resultados:
         print("Sin resoluciones nuevas hoy.")
